@@ -1,0 +1,57 @@
+# Prerequisites
+*.d
+
+# Visual Studio Code directory
+.vscode/
+
+# Build directories
+build/
+*-build-*/
+
+# JetBrains related files
+.idea/
+
+# Eclipse related files
+/.cproject
+/.project
+/.pydevproject
+.settings/
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Conda files to be ignored
+environment.yml
+
+# Python files to be ignored
+__pycache__
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Mkdocs
+docs/site/*

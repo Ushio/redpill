@@ -1,0 +1,3 @@
+[submodule "libs/prlib"]
+	path = libs/prlib
+	url = https://github.com/Ushio/prlib
