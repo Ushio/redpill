@@ -129,7 +129,7 @@ int main() {
 
 #if 1
 	MLP mlp( MLPConfig()
-        .shape( { 1, 64, 64, 64, 1 } )
+		.shape( { 1, 48, 48, 48, 1 } )
         .learningRate( 0.05f )
         .initType( InitializationType::He )
         .activationType( ActivationType::ReLU )

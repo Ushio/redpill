@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <random>
+#include "prth.hpp"
 
 #if defined( RPML_DISABLE_ASSERT )
 #define RPML_ASSERT( ExpectTrue ) ;
@@ -333,14 +335,30 @@ namespace rpml
 		Sigmoid
 	};
 
+	class LayerContext
+	{
+	public:
+		Mat& var( const char *name )
+		{
+			return m_variables[name];
+		}
+		const Mat& var( const char* name ) const
+		{
+			return m_variables.find( name )->second;
+		}
+	private:
+		std::map<std::string, Mat> m_variables;
+	};
+
 	class Layer
 	{
 	public:
 		Layer( int inputDimensions, int outputDimensions ) : m_inputDimensions( inputDimensions ), m_outputDimensions( outputDimensions ) {}
 		virtual ~Layer() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) = 0;
-		virtual Mat forward( const Mat& value ) = 0;
-		virtual Mat backward( const Mat& gradient ) = 0;
+		virtual void clearDerivative() = 0;
+		virtual Mat forward( const Mat& value, LayerContext* context ) = 0;
+		virtual Mat backward( const Mat& gradient, LayerContext* context ) = 0;
 		virtual void optimize( int nElement ) = 0;
 
 		int inputDimensions() const { return m_inputDimensions; }
@@ -373,7 +391,7 @@ namespace rpml
 			// xavier
 			if( initType == InitializationType::Xavier )
 			{
-				float k = std::sqrt( 6.0f ) / std::sqrt( inputDimensions() + outputDimensions() );
+				float k = std::sqrt( 6.0f ) / std::sqrt( (float)inputDimensions() + (float)outputDimensions() );
 				FOR_EACH_ELEMENT( m_W, ix, iy )
 				{
 					m_W( ix, iy ) = drawRange( -k, k, rng );
@@ -385,7 +403,7 @@ namespace rpml
 			} 
 			else if( initType == InitializationType::He )
 			{
-				float s = std::sqrt( 2.0f / inputDimensions() );
+				float s = std::sqrt( 2.0f / (float)inputDimensions() );
 				BoxMular m( rng );
 				FOR_EACH_ELEMENT( m_W, ix, iy )
 				{
@@ -401,15 +419,20 @@ namespace rpml
 				RPML_ASSERT( 0 );
 			}
 		}
-
-		virtual Mat forward( const Mat& value )
+		virtual void clearDerivative()
 		{
-			m_x = value;
+			m_dW.reinit( m_W.row(), m_W.col() );
+			m_db.reinit( m_b.row(), m_b.col() );
+		}
+		virtual Mat forward( const Mat& value, LayerContext* context )
+		{
+			context->var( "x" ) = value; // input ( N, input )
 			return addVectorForEachRow( value * m_W, m_b );
 		}
-		virtual Mat backward( const Mat& gradient )
+		virtual Mat backward( const Mat& gradient, LayerContext* context )
 		{
-			m_dW = transpose( m_x ) * gradient;
+			const Mat& x = context->var( "x" );
+			m_dW = transpose( x ) * gradient;
 			m_db = vertialSum( gradient );
 			return gradient * transpose( m_W );
 		}
@@ -418,7 +441,6 @@ namespace rpml
 			m_oW->optimize( &m_W, m_dW, nElement );
 			m_ob->optimize( &m_b, m_db, nElement );
 		}
-		Mat m_x;  // flowed data ( N, input )
 		Mat m_W;  // ( input, output )
 		Mat m_b;  // ( 1, output )
 		Mat m_dW; // ÝL/ÝW = ( input, output )
@@ -432,9 +454,10 @@ namespace rpml
 	public:
 		ReLULayer( int i, int o ) : Layer( i, o ) {}
 
-		virtual Mat forward( const Mat& value )
+		virtual Mat forward( const Mat& value, LayerContext* context )
 		{
-			m_x = value;
+			context->var( "x" ) = value;
+
 			Mat r( value.row(), value.col() );
 			FOR_EACH_ELEMENT( r, ix, iy )
 			{
@@ -443,25 +466,27 @@ namespace rpml
 			}
 			return r;
 		}
-		virtual Mat backward( const Mat& gradient )
+		virtual Mat backward( const Mat& gradient, LayerContext* context )
 		{
+			const Mat& x = context->var( "x" );
+
 			Mat r( gradient.row(), gradient.col() );
 			FOR_EACH_ELEMENT( gradient, ix, iy )
 			{
-				float d = 0.0f < m_x( ix, iy ) ? 1.0f : 0.0f;
+				float d = 0.0f < x( ix, iy ) ? 1.0f : 0.0f;
 				r( ix, iy ) = d * gradient( ix, iy );
 			}
 			return r;
 		}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
+		virtual void clearDerivative() {}
 		virtual void optimize( int nElement ) {}
-		Mat m_x;
 	};
 	class SigmoidLayer : public Layer
 	{
 	public:
 		SigmoidLayer( int i, int o ) : Layer( i, o ) {}
-		virtual Mat forward( const Mat& value )
+		virtual Mat forward( const Mat& value, LayerContext* context )
 		{
 			Mat r( value.row(), value.col() );
 			FOR_EACH_ELEMENT( r, ix, iy )
@@ -469,29 +494,30 @@ namespace rpml
 				float x = value( ix, iy );
 				r( ix, iy ) = 1.0f / ( 1.0f + std::exp( -x ) );
 			}
-			m_y = r;
+			context->var( "y" ) = r;
 			return r;
 		}
-		virtual Mat backward( const Mat& gradient )
+		virtual Mat backward( const Mat& gradient, LayerContext* context )
 		{
+			const Mat& y = context->var( "y" );
+
 			Mat r( gradient.row(), gradient.col() );
 			FOR_EACH_ELEMENT( gradient, ix, iy )
 			{
-				float d = m_y( ix, iy ) * ( 1.0f - m_y( ix, iy ) );
+				float d = y( ix, iy ) * ( 1.0f - y( ix, iy ) );
 				r( ix, iy ) = d * gradient( ix, iy );
 			}
 			return r;
 		}
+		virtual void clearDerivative() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement ) {}
-
-		Mat m_y;
 	};
 	class TanhLayer : public Layer
 	{
 	public:
 		TanhLayer( int i, int o ) : Layer( i, o ) {}
-		virtual Mat forward( const Mat& value )
+		virtual Mat forward( const Mat& value, LayerContext* context )
 		{
 			Mat r( value.row(), value.col() );
 			FOR_EACH_ELEMENT( r, ix, iy )
@@ -499,24 +525,24 @@ namespace rpml
 				float x = value( ix, iy );
 				r( ix, iy ) = std::tanh( x );
 			}
-			m_y = r;
+			context->var( "y" ) = r;
 			return r;
 		}
-		virtual Mat backward( const Mat& gradient )
+		virtual Mat backward( const Mat& gradient, LayerContext* context )
 		{
+			const Mat& y = context->var( "y" );
+
 			Mat r( gradient.row(), gradient.col() );
 			FOR_EACH_ELEMENT( gradient, ix, iy )
 			{
-				float y = m_y( ix, iy );
-				float d = 1.0f - y * y;
+				float d = 1.0f - y( ix, iy ) * y( ix, iy );
 				r( ix, iy ) = d * gradient( ix, iy );
 			}
 			return r;
 		}
+		virtual void clearDerivative() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement ) {}
-
-		Mat m_y;
 	};
 
 	inline float mse( const Mat& x, const Mat& ref )
@@ -607,11 +633,12 @@ namespace rpml
 
 			int nElement = x.row();
 
+			std::vector<LayerContext> layerContexts( m_layers.size() );
 			Mat m = x;
 			for( int i = 0; i < m_layers.size(); i++ )
 			{
 				RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
-				m = m_layers[i]->forward( m );
+				m = m_layers[i]->forward( m, &layerContexts[i] );
 				RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
 			}
 
@@ -622,7 +649,7 @@ namespace rpml
 			for( int i = (int)m_layers.size() - 1; 0 <= i; i-- )
 			{
 				RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
-				m = m_layers[i]->backward( m );
+				m = m_layers[i]->backward( m, &layerContexts[i] );
 				RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
 			}
 			for( int i = 0; i < m_layers.size(); i++ )
@@ -634,11 +661,12 @@ namespace rpml
 		}
 		Mat forward( const Mat& x )
 		{
+			std::vector<LayerContext> layerContexts( m_layers.size() );
 			Mat m = x;
 			for( int i = 0; i < m_layers.size(); i++ )
 			{
 				RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
-				m = m_layers[i]->forward( m );
+				m = m_layers[i]->forward( m, &layerContexts[i] );
 				RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
 			}
 			return m;

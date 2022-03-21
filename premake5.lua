@@ -73,6 +73,7 @@ project "bugcatcher"
     files { "bugcatcher.cpp" }
     files { "redpill.hpp" }
     includedirs { "." }
+    includedirs { "libs/prlib/src" }
 
     -- UTF8
     postbuildcommands { 
