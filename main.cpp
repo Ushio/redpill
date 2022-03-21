@@ -2,7 +2,7 @@
 #include <iostream>
 #include <memory>
 
-//#define RPML_DISABLE_ASSERT
+#define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
 using namespace rpml;
 
@@ -129,7 +129,7 @@ int main() {
 
 #if 1
 	MLP mlp( MLPConfig()
-		.shape( { 1, 48, 48, 48, 1 } )
+		.shape( { 1, 64, 64, 64, 64, 1 } )
         .learningRate( 0.05f )
         .initType( InitializationType::He )
         .activationType( ActivationType::ReLU )
@@ -176,7 +176,7 @@ int main() {
 
         // Batch 
         StandardRng rng;
-        int NData = 1024; // super naiive
+		int NData = 256 * 64; // super naiive
         Mat inputs( NData, 1 );
 		Mat refs( NData, 1 );
 		for( int i = 0; i < NData; ++i )

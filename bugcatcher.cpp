@@ -68,6 +68,23 @@ TEST_CASE( "Mat vertialSum", "[Mat vertialSum]" )
 	REQUIRE( r( 1, 0 ) == 7.0f );
 	REQUIRE( r( 2, 0 ) == 7.0f );
 }
+TEST_CASE( "Mat sliceH", "[Mat sliceH]" )
+{
+    Mat a = fromRowMajor( 3, 3, { 
+        1, 2, 3, 
+        6, 5, 4,
+        7, 8, 9,
+    });
+	Mat r = sliceH( a, 1, 2 );
+	REQUIRE( r.row() == 1 );
+	REQUIRE( r.col() == 3 );
+	REQUIRE( r( 0, 0 ) == 6 );
+	REQUIRE( r( 1, 0 ) == 5 );
+	REQUIRE( r( 2, 0 ) == 4 );
+
+
+}
+
 TEST_CASE("AffineLayer foward", "[affine foward]") 
 {
     AffineLayer layer( 2, 3, OptimizerType::SGD, 0.01f );
@@ -134,6 +151,9 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 	float mse = evalMSE();
 	
     // back propagation
+	layer0.setupPropagation();
+	sigmoidLayer.setupPropagation();
+	layer1.setupPropagation();
 	layer0.backward( sigmoidLayer.backward( layer1.backward( mse_backward( o, ref ), &context1 ), &contextS ), &context0 );
 
     // calc numerical derivatives

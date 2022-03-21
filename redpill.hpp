@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <random>
+#include <mutex>
 #include "prth.hpp"
 
 #if defined( RPML_DISABLE_ASSERT )
@@ -148,6 +149,23 @@ namespace rpml
 				s += m( ix, iy );
 			}
 			r( ix, 0 ) = s;
+		}
+		return r;
+	}
+	inline Mat sliceH( const Mat& x, int beg, int end )
+	{
+		RPML_ASSERT( 0 <= beg );
+		RPML_ASSERT( end <= x.row() );
+		RPML_ASSERT( beg <= end );
+
+		int localN = end - beg;
+		Mat r( localN, x.col() );
+		for( int i = 0; i < localN; i++ )
+		{
+			for( int j = 0; j < x.col(); ++j )
+			{
+				r( j, i ) = x( j, beg + i );
+			}
 		}
 		return r;
 	}
@@ -356,7 +374,7 @@ namespace rpml
 		Layer( int inputDimensions, int outputDimensions ) : m_inputDimensions( inputDimensions ), m_outputDimensions( outputDimensions ) {}
 		virtual ~Layer() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) = 0;
-		virtual void clearDerivative() = 0;
+		virtual void setupPropagation() = 0;
 		virtual Mat forward( const Mat& value, LayerContext* context ) = 0;
 		virtual Mat backward( const Mat& gradient, LayerContext* context ) = 0;
 		virtual void optimize( int nElement ) = 0;
@@ -385,6 +403,8 @@ namespace rpml
 			}
 			m_oW->initialize( m_W.row(), m_W.col() );
 			m_ob->initialize( m_b.row(), m_b.col() );
+
+			setupPropagation();
 		}
 		virtual void initialize( InitializationType initType , Rng* rng )
 		{
@@ -419,7 +439,7 @@ namespace rpml
 				RPML_ASSERT( 0 );
 			}
 		}
-		virtual void clearDerivative()
+		virtual void setupPropagation()
 		{
 			m_dW.reinit( m_W.row(), m_W.col() );
 			m_db.reinit( m_b.row(), m_b.col() );
@@ -432,8 +452,15 @@ namespace rpml
 		virtual Mat backward( const Mat& gradient, LayerContext* context )
 		{
 			const Mat& x = context->var( "x" );
-			m_dW = transpose( x ) * gradient;
-			m_db = vertialSum( gradient );
+			Mat dW = transpose( x ) * gradient;
+			Mat db = vertialSum( gradient );
+
+			{
+				std::lock_guard<std::mutex> lc( m_dmutex );
+				m_dW = m_dW + dW;
+				m_db = m_db + db;
+			}
+
 			return gradient * transpose( m_W );
 		}
 		virtual void optimize( int nElement ) 
@@ -447,6 +474,8 @@ namespace rpml
 		Mat m_db; // Å›L/Å›b = ( 1, output )
 		std::unique_ptr<Optimizer> m_oW;
 		std::unique_ptr<Optimizer> m_ob;
+
+		std::mutex m_dmutex;
 	};
 
 	class ReLULayer : public Layer
@@ -479,7 +508,7 @@ namespace rpml
 			return r;
 		}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
-		virtual void clearDerivative() {}
+		virtual void setupPropagation() {}
 		virtual void optimize( int nElement ) {}
 	};
 	class SigmoidLayer : public Layer
@@ -509,7 +538,7 @@ namespace rpml
 			}
 			return r;
 		}
-		virtual void clearDerivative() {}
+		virtual void setupPropagation() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement ) {}
 	};
@@ -540,7 +569,7 @@ namespace rpml
 			}
 			return r;
 		}
-		virtual void clearDerivative() {}
+		virtual void setupPropagation() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement ) {}
 	};
@@ -588,7 +617,7 @@ namespace rpml
 	class MLP
 	{
 	public:
-		MLP( const MLPConfig& config )
+		MLP( const MLPConfig& config ) : m_pool( std::thread::hardware_concurrency() )
 		{
 			m_rng = std::unique_ptr<Rng>( new StandardRng() );
 			for( int i = 0; i < config.m_shape.size() - 1; i++ )
@@ -633,29 +662,76 @@ namespace rpml
 
 			int nElement = x.row();
 
-			std::vector<LayerContext> layerContexts( m_layers.size() );
-			Mat m = x;
 			for( int i = 0; i < m_layers.size(); i++ )
 			{
-				RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
-				m = m_layers[i]->forward( m, &layerContexts[i] );
-				RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
+				m_layers[i]->setupPropagation();
 			}
 
-			// m: estimated result
-			float loss = mse( m, y );
+			float loss = 0.0f;
+			std::mutex lmutex;
 
-			m = mse_backward( m, y );
-			for( int i = (int)m_layers.size() - 1; 0 <= i; i-- )
+			pr::TaskGroup g;
+			g.addElements( nElement );
+			m_pool.enqueueFor( nElement, 2, [&]( int64_t beg, int64_t end ) 
 			{
-				RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
-				m = m_layers[i]->backward( m, &layerContexts[i] );
-				RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
-			}
+				std::vector<LayerContext> layerContexts( m_layers.size() );
+
+				Mat m = sliceH( x, beg, end );
+				Mat slicedY = sliceH( y, beg, end );
+				
+				for( int i = 0; i < m_layers.size(); i++ )
+				{
+					RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
+					m = m_layers[i]->forward( m, &layerContexts[i] );
+					RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
+				}
+
+				// m: estimated result
+				float L = mse( m, slicedY );
+				{
+					std::lock_guard<std::mutex> lc( lmutex );
+					loss += L;
+				}
+
+				m = mse_backward( m, slicedY );
+				for( int i = (int)m_layers.size() - 1; 0 <= i; i-- )
+				{
+					RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
+					m = m_layers[i]->backward( m, &layerContexts[i] );
+					RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
+				}
+				g.doneElements( end - beg );
+			} );
+			g.waitForAllElementsToFinish();
+
 			for( int i = 0; i < m_layers.size(); i++ )
 			{
 				m_layers[i]->optimize( nElement );
 			}
+
+			//std::vector<LayerContext> layerContexts( m_layers.size() );
+			//Mat m = x;
+			//for( int i = 0; i < m_layers.size(); i++ )
+			//{
+			//	RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
+			//	m = m_layers[i]->forward( m, &layerContexts[i] );
+			//	RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
+			//}
+
+			//// m: estimated result
+			//float loss = mse( m, y );
+
+			//m = mse_backward( m, y );
+			//for( int i = (int)m_layers.size() - 1; 0 <= i; i-- )
+			//{
+			//	RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
+			//	m = m_layers[i]->backward( m, &layerContexts[i] );
+			//	RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
+			//}
+			//for( int i = 0; i < m_layers.size(); i++ )
+			//{
+			//	m_layers[i]->optimize( nElement );
+			//}
 
 			return loss;
 		}
@@ -674,5 +750,6 @@ namespace rpml
 
 		std::vector<std::unique_ptr<Layer>> m_layers;
 		std::unique_ptr<Rng> m_rng;
+		pr::ThreadPool m_pool;
 	};
 } // namespace rpml
