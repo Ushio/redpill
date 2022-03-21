@@ -399,6 +399,7 @@ namespace rpml
 	enum class ActivationType 
 	{
 		ReLU,
+		LeakyReLU,
 		Tanh,
 		Sigmoid
 	};
@@ -561,6 +562,39 @@ namespace rpml
 		virtual void setupPropagation() {}
 		virtual void optimize( int nElement ) {}
 	};
+	class LeakyReLULayer : public Layer
+	{
+	public:
+		LeakyReLULayer( int i, int o ) : Layer( i, o ) {}
+
+		virtual Mat forward( const Mat& value, LayerContext* context )
+		{
+			context->var( "x" ) = value;
+
+			Mat r( value.row(), value.col() );
+			FOR_EACH_ELEMENT( r, ix, iy )
+			{
+				float x = value( ix, iy );
+				r( ix, iy ) = 0.0f < x ? x : x * 0.05f;
+			}
+			return r;
+		}
+		virtual Mat backward( const Mat& gradient, LayerContext* context )
+		{
+			const Mat& x = context->var( "x" );
+
+			Mat r( gradient.row(), gradient.col() );
+			FOR_EACH_ELEMENT( gradient, ix, iy )
+			{
+				float d = 0.0f < x( ix, iy ) ? 1.0f : 0.05f;
+				r( ix, iy ) = d * gradient( ix, iy );
+			}
+			return r;
+		}
+		virtual void initialize( InitializationType initType, Rng* rng ) {}
+		virtual void setupPropagation() {}
+		virtual void optimize( int nElement ) {}
+	};
 	class SigmoidLayer : public Layer
 	{
 	public:
@@ -689,6 +723,9 @@ namespace rpml
 					{
 					case ActivationType::ReLU:
 						activation = std::unique_ptr<Layer>( new ReLULayer( output, output ) );
+						break;
+					case ActivationType::LeakyReLU:
+						activation = std::unique_ptr<Layer>( new LeakyReLULayer( output, output ) );
 						break;
 					case ActivationType::Tanh:
 						activation = std::unique_ptr<Layer>( new TanhLayer( output, output ) );

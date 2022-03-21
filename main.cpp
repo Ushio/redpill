@@ -120,7 +120,7 @@ void print( const Mat& m )
 
 float f( float x )
 {
-	return 0.5f + sin( x * 2.5f * glm::pi<float>() ) * 0.25f;
+	return 0.5f + sin( x * 3.5f * glm::pi<float>() ) * 0.25f;
 };
 int main() {
     using namespace pr;
