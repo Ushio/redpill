@@ -23,6 +23,8 @@
 
 namespace rpml
 {
+	const float pi = 3.14159265358979323846f;
+
 	struct Mat
 	{
 		Mat() {}
@@ -364,7 +366,6 @@ namespace rpml
 				m_hasZ1 = false;
 				return m_Z1;
 			}
-			const float pi = 3.14159265358979323846f;
 			
 			float x = m_rng->draw();
 			float y = m_rng->draw();
@@ -403,7 +404,11 @@ namespace rpml
 		Tanh,
 		Sigmoid
 	};
-
+	enum class EncoderType
+	{
+		None,
+		Frequency,
+	};
 	class LayerContext
 	{
 	public:
@@ -482,7 +487,7 @@ namespace rpml
 				}
 				FOR_EACH_ELEMENT( m_b, ix, iy )
 				{
-					m_b( ix, iy ) = 0.0f;
+					m_b( ix, iy ) = m.draw() * s;
 				}
 			}
 			else
@@ -676,6 +681,48 @@ namespace rpml
 		return output - ref;
 	}
 
+	class FrequencyEncoder : public Layer
+	{
+	public:
+		struct Config
+		{
+			int N = 12;
+		};
+		static int output( int input, const Config& config )
+		{
+			return input * config.N * 2;
+		}
+		FrequencyEncoder( int i, int o, const Config& config ) : Layer( i, o ), m_config( config ) {}
+
+		virtual Mat forward( const Mat& value, LayerContext* context )
+		{
+			Mat r( value.row(), outputDimensions() );
+			FOR_EACH_ELEMENT( value, ix, iy )
+			{
+				float x = value( ix, iy );
+
+				for( int i = 0; i < m_config.N ; i++ )
+				{
+					float k = 2.0f * pi * std::pow( 2.0f, i );
+					float a = std::sin( k * x );
+					float b = std::cos( k * x );
+					r( ix * m_config.N * 2 + i * 2 + 0, iy ) = a;
+					r( ix * m_config.N * 2 + i * 2 + 1, iy ) = b;
+				}
+			}
+			return r;
+		}
+		virtual Mat backward( const Mat& gradient, LayerContext* context )
+		{
+			return Mat();
+		}
+		virtual void initialize( InitializationType initType, Rng* rng ) {}
+		virtual void setupPropagation() {}
+		virtual void optimize( int nElement ) {}
+
+		Config m_config;
+	};
+
 	class MLPConfig
 	{
 	public:
@@ -684,6 +731,9 @@ namespace rpml
 		ActivationType m_activationType = ActivationType::ReLU;
 		InitializationType m_initType = InitializationType::He;
 		OptimizerType m_optimType = OptimizerType::Adam;
+		EncoderType m_encoderType = EncoderType::None;
+		FrequencyEncoder::Config m_frequencyEncoderConfig;
+
 #define PROP( name ) \
 		MLPConfig& name( const decltype( m_##name )& name ) \
 		{ \
@@ -696,6 +746,8 @@ namespace rpml
 		PROP( activationType );
 		PROP( optimType );
 		PROP( initType );
+		PROP( encoderType );
+		PROP( frequencyEncoderConfig );
 #undef PROP
 	};
 	class MLP
@@ -704,10 +756,24 @@ namespace rpml
 		MLP( const MLPConfig& config ) : m_pool( std::thread::hardware_concurrency() )
 		{
 			m_rng = std::unique_ptr<Rng>( new StandardRng() );
+
 			for( int i = 0; i < config.m_shape.size() - 1; i++ )
 			{
 				int input = config.m_shape[i];
 				int output = config.m_shape[i + 1];
+
+				if( i == 0 )
+				{
+					if( config.m_encoderType == EncoderType::Frequency )
+					{
+						int encoderOutput = FrequencyEncoder::output( input, config.m_frequencyEncoderConfig );
+						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new FrequencyEncoder( input, encoderOutput, config.m_frequencyEncoderConfig ) );
+						encoder->initialize( config.m_initType, m_rng.get() );
+						m_layers.emplace_back( std::move( encoder ) );
+
+						input = encoderOutput;
+					}
+				}
 
 				std::unique_ptr<Layer> layer( new AffineLayer( input, output, config.m_optimType, config.m_learningRate ) );
 				layer->initialize( config.m_initType, m_rng.get() );
@@ -834,7 +900,6 @@ namespace rpml
 			}
 			return m;
 		}
-
 		std::vector<std::unique_ptr<Layer>> m_layers;
 		std::unique_ptr<Rng> m_rng;
 		pr::ThreadPool m_pool;
