@@ -43,7 +43,7 @@ namespace rpml
 			RPML_ASSERT( 0 <= x && x < m_col );
 			return m_data[m_row * x + y];
 		}
-		float operator()( int x, int y ) const
+		const float& operator()( int x, int y ) const
 		{
 			RPML_ASSERT( 0 <= y && y < m_row );
 			RPML_ASSERT( 0 <= x && x < m_col );
@@ -77,11 +77,11 @@ namespace rpml
 		return Mat( row, col, init );
 	}
 
-	inline Mat operator*( const Mat& ma, const Mat& mb )
+	inline Mat mul( const Mat& ma, const Mat& mb )
 	{
 		RPML_ASSERT( ma.col() == mb.row() );
-		Mat r( ma.row(), mb.col() );
 
+		Mat r( ma.row(), mb.col() );
 		FOR_EACH_ELEMENT( r, ix, iy )
 		{
 			const int n = ma.col();
@@ -93,6 +93,56 @@ namespace rpml
 			r( ix, iy ) = v;
 		}
 		return r;
+	}
+	inline Mat mulSIMD( const Mat& ma, const Mat& mb )
+	{
+		RPML_ASSERT( ma.col() == mb.row() );
+
+		Mat r( ma.row(), mb.col() );
+		int ix = 0;
+		while( ix < r.col() )
+		{
+			int iy = 0;
+			while( iy < r.row() )
+			{
+				if( iy + 8 <= r.row() )
+				{
+					__m256 v = _mm256_setzero_ps();
+
+					const int n = ma.col();
+					for( int i = 0; i < n; i++ )
+					{
+						__m256 lhs = _mm256_loadu_ps( &ma( i, iy ) );
+						__m256 rhs = _mm256_set1_ps( mb( ix, i ) );
+						v = _mm256_fmadd_ps( lhs, rhs, v );
+					}
+
+					_mm256_storeu_ps( &r( ix, iy ), v );
+					iy += 8;
+				}
+				else
+				{
+					const int n = ma.col();
+					float v = 0.0f;
+					for( int i = 0; i < n; i++ )
+					{
+						v += ma( i, iy ) * mb( ix, i );
+					}
+					r( ix, iy ) = v;
+					iy++;
+				}
+			}
+			ix++;
+		}
+		return r;
+	}
+	inline Mat operator*( const Mat& ma, const Mat& mb )
+	{
+#if 0
+		return mul( ma, mb );
+#else 
+		return mulSIMD( ma, mb );
+#endif
 	}
 
 	inline Mat operator+( const Mat& ma, const Mat& mb )

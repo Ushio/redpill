@@ -81,8 +81,31 @@ TEST_CASE( "Mat sliceH", "[Mat sliceH]" )
 	REQUIRE( r( 0, 0 ) == 6 );
 	REQUIRE( r( 1, 0 ) == 5 );
 	REQUIRE( r( 2, 0 ) == 4 );
+}
 
+TEST_CASE( "Mat simd", "[Mat simd]" )
+{
+	StandardRng rng;
+	Mat ma( 129, 321 );
+	Mat mb( 321, 129 );
 
+	for( int i = 0; i < 10; ++i )
+	{
+		FOR_EACH_ELEMENT( ma, ix, iy )
+		{
+			ma( ix, iy ) = rng.draw();
+		}
+		FOR_EACH_ELEMENT( mb, ix, iy )
+		{
+			mb( ix, iy ) = rng.draw();
+		}
+		Mat m = mul( ma, mb );
+		Mat m_simd = mulSIMD( ma, mb );
+		FOR_EACH_ELEMENT( m, ix, iy )
+		{
+			REQUIRE( m( ix, iy ) == Approx( m_simd( ix, iy ) ).margin( 0.0000001f ) );
+		}
+	}
 }
 
 TEST_CASE("AffineLayer foward", "[affine foward]") 

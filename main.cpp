@@ -129,10 +129,10 @@ int main() {
 
 #if 1
 	MLP mlp( MLPConfig()
-		.shape( { 1, 64, 64, 64, 64, 1 } )
+		.shape( { 1, 128, 128, 1 } )
         .learningRate( 0.05f )
         .initType( InitializationType::He )
-        .activationType( ActivationType::ReLU )
+		.activationType( ActivationType::ReLU )
     );
 
   //  auto rng = new StandardRng();
@@ -142,6 +142,31 @@ int main() {
   //      printf("%f\n", box.draw());
 		////printf( "%f\n", rng->draw() );
   //  }
+
+
+ //   for( ;; )
+	//{
+	//	static StandardRng rng;
+	//	Mat ma( 129, 129 );
+	//	Mat mb( 129, 129 );
+ //       
+ //       float p = 0.0f;
+
+ //       Stopwatch sw;
+
+	//	for(int i = 0 ; i < 1000; ++i)
+	//	{
+	//		FOR_EACH_ELEMENT( ma, ix, iy )
+	//		{
+	//			ma( ix, iy ) = glm::mix( -1.2f, 1.2f, rng.draw() );
+	//			mb( ix, iy ) = glm::mix( -1.2f, 1.2f, rng.draw() );
+ //           }
+	//		Mat m = ma * mb;
+
+ //           p += m( 64, 64 );
+ //       }
+ //       printf( "%f s ---- %f\n", sw.elapsed(), p );
+	//}
 
 	Config config;
 	config.ScreenWidth = 1920;
@@ -176,12 +201,12 @@ int main() {
 
         // Batch 
         StandardRng rng;
-		int NData = 256 * 64; // super naiive
+		int NData = 256 * 128; // super naiive
         Mat inputs( NData, 1 );
 		Mat refs( NData, 1 );
 		for( int i = 0; i < NData; ++i )
 		{
-			float x = glm::mix( -0.2f, 1.2f, rng.draw() );
+			float x = glm::mix( -0.1f, 1.1f, rng.draw() );
 			float y = f( x );
 			inputs( 0, i ) = x;
 			refs( 0, i ) = y;
