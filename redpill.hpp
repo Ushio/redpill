@@ -276,6 +276,8 @@ namespace rpml
 			float value = *reinterpret_cast<float *>(&bits) - 1.0f;
 			return value;
 		}
+
+	private:
 		pcg::pcg_state_setseq_64 m_rng;
 	};
 
@@ -319,10 +321,16 @@ namespace rpml
 		SGD,
 		Adam,
 	};
-	enum class InitializeStrategy
+	enum class InitializationType
 	{
 		Xavier,
 		He
+	};
+	enum class ActivationType 
+	{
+		ReLU,
+		Tanh,
+		Sigmoid
 	};
 
 	class Layer
@@ -330,7 +338,7 @@ namespace rpml
 	public:
 		Layer( int inputDimensions, int outputDimensions ) : m_inputDimensions( inputDimensions ), m_outputDimensions( outputDimensions ) {}
 		virtual ~Layer() {}
-		virtual void initialize( InitializeStrategy strategy, Rng *rng ) = 0;
+		virtual void initialize( InitializationType initType, Rng* rng ) = 0;
 		virtual Mat forward( const Mat& value ) = 0;
 		virtual Mat backward( const Mat& gradient ) = 0;
 		virtual void optimize( int nElement ) = 0;
@@ -360,10 +368,10 @@ namespace rpml
 			m_oW->initialize( m_W.row(), m_W.col() );
 			m_ob->initialize( m_b.row(), m_b.col() );
 		}
-		virtual void initialize( InitializeStrategy strategy, Rng* rng )
+		virtual void initialize( InitializationType initType , Rng* rng )
 		{
 			// xavier
-			if( strategy == InitializeStrategy::Xavier )
+			if( initType == InitializationType::Xavier )
 			{
 				float k = std::sqrt( 6.0f ) / std::sqrt( inputDimensions() + outputDimensions() );
 				FOR_EACH_ELEMENT( m_W, ix, iy )
@@ -374,6 +382,23 @@ namespace rpml
 				{
 					m_b( ix, iy ) = drawRange( -k, k, rng );
 				}
+			} 
+			else if( initType == InitializationType::He )
+			{
+				float s = std::sqrt( 2.0f / inputDimensions() );
+				BoxMular m( rng );
+				FOR_EACH_ELEMENT( m_W, ix, iy )
+				{
+					m_W( ix, iy ) = m.draw() * s;
+				}
+				FOR_EACH_ELEMENT( m_b, ix, iy )
+				{
+					m_b( ix, iy ) = 0.0f;
+				}
+			}
+			else
+			{
+				RPML_ASSERT( 0 );
 			}
 		}
 
@@ -428,7 +453,7 @@ namespace rpml
 			}
 			return r;
 		}
-		virtual void initialize( InitializeStrategy strategy, Rng *rng ){}
+		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement ) {}
 		Mat m_x;
 	};
@@ -457,7 +482,7 @@ namespace rpml
 			}
 			return r;
 		}
-		virtual void initialize( InitializeStrategy strategy, Rng *rng ) {}
+		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement ) {}
 
 		Mat m_y;
@@ -488,40 +513,10 @@ namespace rpml
 			}
 			return r;
 		}
-		virtual void initialize( InitializeStrategy strategy, Rng* rng ) {}
+		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement ) {}
 
 		Mat m_y;
-	};
-
-	class MeanSquaredErrorLayer
-	{
-	public:
-		MeanSquaredErrorLayer()
-		{
-		}
-		virtual Mat forward( const Mat& value )
-		{
-			RPML_ASSERT( m_y.row() == value.row() );
-			RPML_ASSERT( m_y.col() == value.col() );
-
-			m_x = value;
-			float e = 0.0f;
-			FOR_EACH_ELEMENT( m_y, ix, iy )
-			{
-				float d = m_y( ix, iy ) - value( ix, iy );
-				e += d * d;
-			}
-
-			// return MSE
-			return fromRowMajor( 1, 1, { e * 0.5f } );
-		}
-		virtual Mat backward( const Mat& )
-		{
-			return m_x - m_y;
-		}
-		Mat m_x; // flowed data ( N, input )
-		Mat m_y; // reference data ( N, input )
 	};
 
 	inline float mse( const Mat& x, const Mat& ref )
@@ -542,26 +537,65 @@ namespace rpml
 		return output - ref;
 	}
 
+	class MLPConfig
+	{
+	public:
+		float m_learningRate = 0.01f;
+		std::vector<int> m_shape;
+		ActivationType m_activationType = ActivationType::ReLU;
+		InitializationType m_initType = InitializationType::He;
+		OptimizerType m_optimType = OptimizerType::Adam;
+#define PROP( name ) \
+		MLPConfig& name( const decltype( m_##name )& name ) \
+		{ \
+			m_##name = name; \
+			return *this; \
+		}
+
+		PROP( learningRate );
+		PROP( shape );
+		PROP( activationType );
+		PROP( optimType );
+		PROP( initType );
+#undef PROP
+	};
 	class MLP
 	{
 	public:
-		MLP( std::vector<int> shape, float learningRate )
+		MLP( const MLPConfig& config )
 		{
 			m_rng = std::unique_ptr<Rng>( new StandardRng() );
-			for( int i = 0; i < shape.size() - 1 ; i++)
+			for( int i = 0; i < config.m_shape.size() - 1; i++ )
 			{
-				int input = shape[i];
-				int output = shape[i+1];
+				int input = config.m_shape[i];
+				int output = config.m_shape[i + 1];
 
-				std::unique_ptr<Layer> layer( new AffineLayer( input, output, OptimizerType::Adam, learningRate ) );
-				layer->initialize( InitializeStrategy::Xavier, m_rng.get() );
+				std::unique_ptr<Layer> layer( new AffineLayer( input, output, config.m_optimType, config.m_learningRate ) );
+				layer->initialize( config.m_initType, m_rng.get() );
 				m_layers.emplace_back( std::move( layer ) );
 
-				bool isLast = i + 1 == shape.size() - 1;
+				bool isLast = i + 1 == config.m_shape.size() - 1;
 				if( !isLast )
 				{
-					std::unique_ptr<Layer> activation( new TanhLayer( output, output ) );
-					activation->initialize( InitializeStrategy::Xavier, m_rng.get() );
+					
+					std::unique_ptr<Layer> activation;
+
+					switch( config.m_activationType )
+					{
+					case ActivationType::ReLU:
+						activation = std::unique_ptr<Layer>( new ReLULayer( output, output ) );
+						break;
+					case ActivationType::Tanh:
+						activation = std::unique_ptr<Layer>( new TanhLayer( output, output ) );
+						break;
+					case ActivationType::Sigmoid:
+						activation = std::unique_ptr<Layer>( new SigmoidLayer( output, output ) );
+						break;
+					default:
+						RPML_ASSERT( 0 );
+					}
+
+					activation->initialize( config.m_initType, m_rng.get() );
 					m_layers.emplace_back( std::move( activation ) );
 				}
 			}
@@ -611,7 +645,6 @@ namespace rpml
 		}
 
 		std::vector<std::unique_ptr<Layer>> m_layers;
-		MeanSquaredErrorLayer m_loss;
 		std::unique_ptr<Rng> m_rng;
 	};
 } // namespace rpml

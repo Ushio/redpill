@@ -128,8 +128,12 @@ int main() {
     SetDataDir(ExecutableDir());
 
 #if 1
-
-    MLP mlp( { 1, 32, 32, 32, 1 }, 0.005f );
+	MLP mlp( MLPConfig()
+        .shape( { 1, 64, 64, 64, 1 } )
+        .learningRate( 0.05f )
+        .initType( InitializationType::He )
+        .activationType( ActivationType::ReLU )
+    );
 
   //  auto rng = new StandardRng();
   //  BoxMular box( rng );
@@ -138,40 +142,6 @@ int main() {
   //      printf("%f\n", box.draw());
 		////printf( "%f\n", rng->draw() );
   //  }
-
-	Xoshiro128StarStar random;
-	AffineLayer layer0( 1, 48, OptimizerType::SGD, 0.05f );
-	ReLULayer sigmoidLayer( 48, 48 );
-	AffineLayer layer1( 48, 48, OptimizerType::SGD, 0.05f );
-	ReLULayer sigmoidLayer2( 48, 48 );
-	AffineLayer layer2( 48, 1, OptimizerType::SGD, 0.05f );
-
-    StandardRng rng;
-
-    FOR_EACH_ELEMENT( layer0.m_W, ix, iy )
-	{
-		layer0.m_W( ix, iy ) = glm::mix( -1.0f, 1.0f, rng.draw() );
-	}
-	FOR_EACH_ELEMENT( layer0.m_b, ix, iy )
-	{
-		layer0.m_b( ix, iy ) = glm::mix( -1.0f, 1.0f, rng.draw() );
-	}
-	FOR_EACH_ELEMENT( layer1.m_W, ix, iy )
-	{
-		layer1.m_W( ix, iy ) = glm::mix( -1.0f, 1.0f, rng.draw() );
-	}
-	FOR_EACH_ELEMENT( layer1.m_b, ix, iy )
-	{
-		layer1.m_b( ix, iy ) = glm::mix( -1.0f, 1.0f, rng.draw() );
-	}
-	FOR_EACH_ELEMENT( layer2.m_W, ix, iy )
-	{
-		layer2.m_W( ix, iy ) = glm::mix( -1.0f, 1.0f, rng.draw() );
-	}
-	FOR_EACH_ELEMENT( layer2.m_b, ix, iy )
-	{
-		layer2.m_b( ix, iy ) = glm::mix( -1.0f, 1.0f, rng.draw() );
-	}
 
 	Config config;
 	config.ScreenWidth = 1920;
@@ -205,81 +175,18 @@ int main() {
 		DrawXYZAxis( 1.0f );
 
         // Batch 
+        StandardRng rng;
         int NData = 1024; // super naiive
         Mat inputs( NData, 1 );
 		Mat refs( NData, 1 );
 		for( int i = 0; i < NData; ++i )
 		{
-			float x = glm::mix( -0.2f, 1.2f, random.uniformf() );
+			float x = glm::mix( -0.2f, 1.2f, rng.draw() );
 			float y = f( x );
 			inputs( 0, i ) = x;
 			refs( 0, i ) = y;
 		}
 		float loss = mlp.train( inputs, refs );
-#if 0
-		MeanSquaredErrorLayer mseLayer;
-		mseLayer.m_y = refs;
-
-        Mat m = inputs;
-		m = layer0.forward( m );
-		m = sigmoidLayer.forward( m );
-		m = layer1.forward( m );
-		m = sigmoidLayer2.forward( m );
-		m = layer2.forward( m );
-		Mat mse = mseLayer.forward( m );
-
-        Mat bm;
-		bm = mseLayer.backward( bm );
-		bm = layer2.backward( bm );
-		bm = sigmoidLayer2.backward( bm );
-		bm = layer1.backward( bm );
-		bm = sigmoidLayer.backward( bm );
-		bm = layer0.backward( bm );
-
-        // learn
-		float s = learning / NData;
-		layer0.m_b = layer0.m_b - multiplyScalar( layer0.m_db, s );
-		layer0.m_W = layer0.m_W - multiplyScalar( layer0.m_dW, s );
-		layer1.m_b = layer1.m_b - multiplyScalar( layer1.m_db, s );
-		layer1.m_W = layer1.m_W - multiplyScalar( layer1.m_dW, s );
-		layer2.m_b = layer2.m_b - multiplyScalar( layer2.m_db, s );
-		layer2.m_W = layer2.m_W - multiplyScalar( layer2.m_dW, s );
-
-#endif
-#if 0
-        Mat layer0_db( layer0.m_b.row(), layer0.m_b.col() );
-		Mat layer0_dW( layer0.m_W.row(), layer0.m_W.col() );
-        Mat layer1_db( layer1.m_b.row(), layer1.m_b.col() );
-		Mat layer1_dW( layer1.m_W.row(), layer1.m_W.col() );
-
-        float mseCur = 0;
-		int NData = 1000; // super naiive
-		for( int i = 0; i < NData; ++i )
-		{
-            float x = glm::mix( -0.2f, 1.2f, random.uniformf() );
-		    float y = f( x );
-            MeanSquaredErrorLayer mseLayer;
-		    mseLayer.m_y = fromRowMajor( 1, 1, { y } );
-
-            Mat input = fromRowMajor( 1, 1, { x } );
-		    Mat o = layer1.forward( sigmoidLayer.forward( layer0.forward( input ) ) );
-		    Mat mse = mseLayer.forward( o );
-			mseCur += mse( 0, 0 );
-
-            Mat k = fromRowMajor( 1, 1, { 0.05f * 1.0f / NData } );
-            layer0.backward( sigmoidLayer.backward( layer1.backward( mseLayer.backward( k ) ) ) );
-
-            layer0_db = layer0_db + layer0.m_db;
-			layer0_dW = layer0_dW + layer0.m_dW;
-			layer1_db = layer1_db + layer1.m_db;
-			layer1_dW = layer1_dW + layer1.m_dW;
-        }
-		// learn
-		layer0.m_b = layer0.m_b - layer0_db;
-		layer0.m_W = layer0.m_W - layer0_dW;
-		layer1.m_b = layer1.m_b - layer1_db;
-		layer1.m_W = layer1.m_W - layer1_dW;
-#endif
 
         int N = 512;
 		LinearTransform i2x( 0, N, 0, 1 );
@@ -308,23 +215,6 @@ int main() {
 			PrimVertex( { x, y, 0 }, { 255, 0, 0 } );
 		}
 		PrimEnd();
-
-		//PrimBegin( PrimitiveMode::LineStrip, 2 );
-		//for( int i = 0; i < N; ++i )
-		//{
-		//	float x = i2x( i );
-		//	Mat input = fromRowMajor( 1, 1, { x } );
-		//	Mat m = mlp.forward( input );
-		//	//Mat m = input;
-		//	//m = layer0.forward( m );
-		//	//m = sigmoidLayer.forward( m );
-		//	//m = layer1.forward( m );
-		//	//m = sigmoidLayer2.forward( m );
-		//	//m = layer2.forward( m );
-		//	float y = m( 0, 0 );
-		//	PrimVertex( { x, y, 0 }, { 255, 0, 0 } );
-		//}
-		//PrimEnd();
 
 		PopGraphicState();
 		EndCamera();

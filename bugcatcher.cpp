@@ -116,21 +116,20 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 
     SigmoidLayer sigmoidLayer( 0, 0 );
 
-    MeanSquaredErrorLayer mseLayer;
-	mseLayer.m_y = fromRowMajor( 1, 1, { 10.0f } );
-
 	Mat x = fromRowMajor( 1, 2, { 1, 1 } );
+	Mat o;
+	Mat ref = fromRowMajor( 1, 1, { 10.0f } );
+
 	auto evalMSE = [&]()
 	{
-		Mat o = layer1.forward( sigmoidLayer.forward( layer0.forward( x ) ) );
-		Mat mse = mseLayer.forward( o );
-		return mse( 0, 0 );
+		o = layer1.forward( sigmoidLayer.forward( layer0.forward( x ) ) );
+		float L = mse( o, ref );
+		return L;
 	};
 	float mse = evalMSE();
 	
     // back propagation
-	layer0.backward( sigmoidLayer.backward( layer1.backward( mseLayer.backward( fromRowMajor( 1, 1, { 1.0f } ) ) ) ) );
-
+	layer0.backward( sigmoidLayer.backward( layer1.backward( mse_backward( o, ref ) ) ) );
 
     // calc numerical derivatives
     Mat dW_numerical( layer0.m_W.row(), layer0.m_W.col() );
@@ -151,7 +150,7 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 
     FOR_EACH_ELEMENT( dW_numerical, ix, iy )
 	{
-		REQUIRE( layer0.m_dW( ix, iy ) == Approx( dW_numerical( ix, iy ) ).margin( 0.01f ) );
+		REQUIRE( layer0.m_dW( ix, iy ) == Approx( dW_numerical( ix, iy ) ).margin( 0.05f ) );
     }
 
     // calc numerical derivatives
@@ -172,6 +171,6 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 	}
 	FOR_EACH_ELEMENT( db_numerical, ix, iy )
 	{
-		REQUIRE( layer0.m_db( ix, iy ) == Approx( db_numerical( ix, iy ) ).margin( 0.01f ) );
+		REQUIRE( layer0.m_db( ix, iy ) == Approx( db_numerical( ix, iy ) ).margin( 0.05f ) );
 	}
 }
