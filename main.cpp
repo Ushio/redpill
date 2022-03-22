@@ -134,7 +134,7 @@ int main() {
 		.shape( { 1, 64, 64, 64, 1 } )
         .learningRate( 0.01f )
         .initType( InitializationType::He )
-		.activationType( ActivationType::LeakyReLU )
+		.activationType( ActivationType::ReLU )
         .encoderType( EncoderType::Frequency )
     );
 

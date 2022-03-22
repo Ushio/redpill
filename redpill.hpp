@@ -270,9 +270,8 @@ namespace rpml
 	{
 	public:
 		OptimizerAdam( float alpha, float beta1 = 0.9f, float beta2 = 0.999f, float e = 0.00000001f ) 
-			: m_alpha( alpha ), m_beta1( beta1 ), m_beta2( beta2 ), m_e(e)
+			: m_alpha( alpha ), m_beta1( beta1 ), m_beta2( beta2 ), m_beta1t( 1.0f ), m_beta2t( 1.0f ), m_e( e )
 		{
-			m_c = m_alpha * std::sqrt( 1.0f - m_beta2 ) / ( 1.0f - m_beta1 );
 		}
 		virtual void initialize( int row, int col )
 		{
@@ -281,12 +280,17 @@ namespace rpml
 		}
 		virtual void optimize( Mat* parameter, const Mat& gradient, int nElement )
 		{
+			m_beta1t *= m_beta1;
+			m_beta2t *= m_beta2;
+
 			FOR_EACH_ELEMENT( (*parameter), ix, iy )
 			{
 				float g = gradient( ix, iy );
 				float m = m_m( ix, iy ) = m_beta1 * m_m( ix, iy ) + ( 1.0f - m_beta1 ) * g;
 				float v = m_v( ix, iy ) = m_beta2 * m_v( ix, iy ) + ( 1.0f - m_beta2 ) * g * g;
-				( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - m * m_c / ( std::sqrt( v ) + m_e );
+				float adam_m_hat = m / ( 1.0f - m_beta1t );
+				float adam_v_hat = v / ( 1.0f - m_beta2t );
+				( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - m_alpha * adam_m_hat / ( std::sqrt( adam_v_hat ) + m_e );
 			}
 		}
 
@@ -294,8 +298,9 @@ namespace rpml
 		float m_alpha;
 		float m_beta1;
 		float m_beta2;
+		float m_beta1t;
+		float m_beta2t;
 		float m_e;
-		float m_c;
 		Mat m_m;
 		Mat m_v;
 	};
