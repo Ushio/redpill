@@ -152,23 +152,23 @@ int main() {
 	//	static StandardRng rng;
 	//	Mat ma( 129, 129 );
 	//	Mat mb( 129, 129 );
- //       
- //       float p = 0.0f;
 
- //       Stopwatch sw;
+	//	float p = 0.0f;
 
-	//	for(int i = 0 ; i < 1000; ++i)
+	//	Stopwatch sw;
+
+	//	for( int i = 0; i < 1000; ++i )
 	//	{
 	//		FOR_EACH_ELEMENT( ma, ix, iy )
 	//		{
 	//			ma( ix, iy ) = glm::mix( -1.2f, 1.2f, rng.draw() );
 	//			mb( ix, iy ) = glm::mix( -1.2f, 1.2f, rng.draw() );
- //           }
+	//		}
 	//		Mat m = ma * mb;
 
- //           p += m( 64, 64 );
- //       }
- //       printf( "%f s ---- %f\n", sw.elapsed(), p );
+	//		p += m( 64, 64 );
+	//	}
+	//	printf( "%f s ---- %f\n", sw.elapsed(), p );
 	//}
 
 	Config config;
@@ -258,7 +258,6 @@ int main() {
 		ImGui::Begin( "Panel" );
 		ImGui::Text( "fps = %f", GetFrameRate() );
 		ImGui::Text( "mse = %.10f", loss / NData );
-		ImGui::InputFloat( "learning", &learning, 0.1f);
 
 		ImGui::End();
 

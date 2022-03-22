@@ -332,6 +332,7 @@ namespace rpml
 	class Rng
 	{
 	public:
+		virtual ~Rng() {}
 		virtual float draw() = 0;
 	};
 	class StandardRng : public Rng
