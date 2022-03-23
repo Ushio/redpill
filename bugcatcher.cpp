@@ -3,7 +3,14 @@
 
 #include "redpill.hpp"
 using namespace rpml;
-
+TEST_CASE( "misc", "[misc]" )
+{
+	REQUIRE( next_multiple( 0, 10 ) == 0 );
+	REQUIRE( next_multiple( 4, 10 ) == 10 );
+	REQUIRE( next_multiple( 10, 10 ) == 10 );
+	REQUIRE( next_multiple( 11, 10 ) == 20 );
+	REQUIRE( next_multiple( 65, 8 ) == 72 );
+}
 TEST_CASE("Mat transpose", "[transpose]") {
     Mat a = fromColMajor(2, 3, { 1, 4, 2, 5, 3, 6 });
     Mat b = fromRowMajor(2, 3, { 1, 2, 3, 4, 5, 6 });

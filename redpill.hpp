@@ -18,38 +18,69 @@
 #endif
 
 #define FOR_EACH_ELEMENT( m, ix, iy )     \
-	for( int ix = 0; ix < m.col(); ix++ ) \
-		for( int iy = 0; iy < m.row(); iy++ )
+	for( int ix = 0; ix < ( m ).col(); ix++ ) \
+		for( int iy = 0; iy < ( m ).row(); iy++ )
 
 namespace rpml
 {
 	const float pi = 3.14159265358979323846f;
 
+	inline int div_round_up( int val, int divisor )
+	{
+		return ( val + divisor - 1 ) / divisor;
+	}
+	inline int next_multiple( int val, int divisor )
+	{
+		return div_round_up( val, divisor ) * divisor;
+	}
+
 	struct Mat
 	{
+		enum
+		{
+			ROW_MULTIPLE = 8
+		};
 		Mat() {}
-		Mat( int row, int col ) : m_row( row ), m_col( col ), m_data( col * row ){};
-		Mat( int row, int col, const std::vector<float> data ) : m_row( row ), m_col( col ), m_data( data ) { RPML_ASSERT( m_row * m_col == m_data.size() ); };
+		Mat( int row, int col ) 
+			: m_row( row ) 
+			, m_paddedRow( next_multiple( row, ROW_MULTIPLE ) )
+			, m_col( col )
+			, m_data( col * next_multiple( row, ROW_MULTIPLE ) ) 
+		{
+		}
+		Mat( int row, int col, const std::vector<float>& data /* col major */ ) 
+			: m_row( row )
+			, m_paddedRow( next_multiple( row, ROW_MULTIPLE ) )
+			, m_col( col )
+			, m_data( col * next_multiple( row, ROW_MULTIPLE ) ) 
+		{
+			RPML_ASSERT( m_row * m_col == data.size() ); 
+
+			FOR_EACH_ELEMENT( *this, ix, iy )
+			{
+				( *this )( ix, iy ) = data[ix * row + iy];
+			}
+		};
 
 		void reinit( int row, int col )
 		{
 			m_row = row;
+			m_paddedRow = next_multiple( row, ROW_MULTIPLE );
 			m_col = col;
 			m_data.clear();
-			m_data.resize( row * col );
-			RPML_ASSERT( m_row * m_col == m_data.size() );
+			m_data.resize( col * m_paddedRow );
 		}
 		float& operator()( int x, int y )
 		{
 			RPML_ASSERT( 0 <= y && y < m_row );
 			RPML_ASSERT( 0 <= x && x < m_col );
-			return m_data[m_row * x + y];
+			return m_data[m_paddedRow * x + y];
 		}
 		const float& operator()( int x, int y ) const
 		{
 			RPML_ASSERT( 0 <= y && y < m_row );
 			RPML_ASSERT( 0 <= x && x < m_col );
-			return m_data[m_row * x + y];
+			return m_data[m_paddedRow * x + y];
 		}
 		int row() const { return m_row; }
 		int col() const { return m_col; }
@@ -57,6 +88,7 @@ namespace rpml
 	private:
 		std::vector<float> m_data;
 		int m_row = 0;
+		int m_paddedRow = 0;
 		int m_col = 0;
 	};
 
@@ -107,32 +139,18 @@ namespace rpml
 			int iy = 0;
 			while( iy < r.row() )
 			{
-				if( iy + 8 <= r.row() )
-				{
-					__m256 v = _mm256_setzero_ps();
+				__m256 v = _mm256_setzero_ps();
 
-					const int n = ma.col();
-					for( int i = 0; i < n; i++ )
-					{
-						__m256 lhs = _mm256_loadu_ps( &ma( i, iy ) );
-						__m256 rhs = _mm256_set1_ps( mb( ix, i ) );
-						v = _mm256_fmadd_ps( lhs, rhs, v );
-					}
-
-					_mm256_storeu_ps( &r( ix, iy ), v );
-					iy += 8;
-				}
-				else
+				const int n = ma.col();
+				for( int i = 0; i < n; i++ )
 				{
-					const int n = ma.col();
-					float v = 0.0f;
-					for( int i = 0; i < n; i++ )
-					{
-						v += ma( i, iy ) * mb( ix, i );
-					}
-					r( ix, iy ) = v;
-					iy++;
+					__m256 lhs = _mm256_loadu_ps( &ma( i, iy ) );
+					__m256 rhs = _mm256_set1_ps( mb( ix, i ) );
+					v = _mm256_fmadd_ps( lhs, rhs, v );
 				}
+
+				_mm256_storeu_ps( &r( ix, iy ), v );
+				iy += 8;
 			}
 			ix++;
 		}
@@ -853,11 +871,16 @@ namespace rpml
 				}
 
 				m = mse_backward( m, slicedY );
+
 				for( int i = (int)m_layers.size() - 1; 0 <= i; i-- )
 				{
 					RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
 					m = m_layers[i]->backward( m, &layerContexts[i] );
-					RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
+
+					if( i != 0 )
+					{
+						RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
+					}
 				}
 				g.doneElements( end - beg );
 			} );
