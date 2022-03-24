@@ -120,19 +120,20 @@ namespace rpml
 		int m_col = 0;
 	};
 
-	inline Mat transpose( const Mat& m )
+	inline void transpose( Mat *r, const Mat& m )
 	{
-		Mat r( m.col(), m.row() );
-		FOR_EACH_ELEMENT( r, ix, iy )
+		( *r ).setShape( m.col(), m.row() );
+		FOR_EACH_ELEMENT( *r, ix, iy )
 		{
-			r( ix, iy ) = m( iy, ix );
+			( *r )( ix, iy ) = m( iy, ix );
 		}
-		return r;
 	}
 
 	inline Mat fromRowMajor( int row, int col, std::initializer_list<float> init )
 	{
-		return transpose( Mat( col, row, init ) );
+		Mat t;
+		transpose( &t, Mat( col, row, init ) );
+		return t;
 	}
 	inline Mat fromColMajor( int row, int col, std::initializer_list<float> init )
 	{
@@ -567,8 +568,10 @@ namespace rpml
 		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context )
 		{
 			const Mat& x = context->var( "x" );
-			Mat dW;
-			mul( &dW, transpose( x ), gradient );
+			Mat& dW = context->var( "dW" );
+			Mat& trx = context->var( "trx" );
+			transpose( &trx, x );
+			mul( &dW, trx, gradient );
 			Mat db = vertialSum( gradient );
 
 			{
@@ -577,7 +580,9 @@ namespace rpml
 				m_db = m_db + db;
 			}
 
-			mul( r, gradient, transpose( m_W ) );
+			Mat& trW = context->var( "trW" );
+			transpose( &trW, m_W );
+			mul( r, gradient, trW );
 		}
 		virtual void optimize( int nElement ) 
 		{
