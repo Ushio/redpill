@@ -4,6 +4,8 @@
 #include <string>
 #include <random>
 #include <mutex>
+#include <algorithm>
+
 #include "prth.hpp"
 
 #if defined( RPML_DISABLE_ASSERT )
@@ -104,6 +106,13 @@ namespace rpml
 		int row() const { return m_row; }
 		int col() const { return m_col; }
 
+		void swap( Mat& rhs )
+		{
+			std::swap( m_data, rhs.m_data );
+			std::swap( m_row, rhs.m_row );
+			std::swap( m_paddedRow, rhs.m_paddedRow );
+			std::swap( m_col, rhs.m_col );
+		}
 	private:
 		std::vector<float> m_data;
 		int m_row = 0;
@@ -879,7 +888,7 @@ namespace rpml
 					RPML_ASSERT( inputMat.col() == m_layers[i]->inputDimensions() );
 					m_layers[i]->forward( &outputMat, inputMat, &layerContexts[i] );
 					RPML_ASSERT( outputMat.col() == m_layers[i]->outputDimensions() );
-					std::swap( inputMat, outputMat );
+					inputMat.swap( outputMat );
 				}
 
 				// m: estimated result
@@ -900,7 +909,7 @@ namespace rpml
 					{
 						RPML_ASSERT( outputMat.col() == m_layers[i]->inputDimensions() );
 					}
-					std::swap( inputMat, outputMat );
+					inputMat.swap( outputMat );
 				}
 				g.doneElements( end - beg );
 			} );
@@ -947,7 +956,7 @@ namespace rpml
 				RPML_ASSERT( inputMat.col() == m_layers[i]->inputDimensions() );
 				m_layers[i]->forward( &outputMat, inputMat, &layerContexts[i] );
 				RPML_ASSERT( outputMat.col() == m_layers[i]->outputDimensions() );
-				std::swap( inputMat, outputMat );
+				inputMat.swap( outputMat );
 			}
 			return inputMat;
 		}

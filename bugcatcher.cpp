@@ -182,9 +182,9 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 	{
 		Mat input = x;
 		Mat output;
-		layer0.forward( &output, input, &context0 ); std::swap( input, output );
-		sigmoidLayer.forward( &output, input, &contextS ); std::swap( input, output );
-		layer1.forward( &output, input, &context1 ); std::swap( input, output );
+		layer0.forward( &output, input, &context0 ); input.swap( output );
+		sigmoidLayer.forward( &output, input, &contextS ); input.swap( output );
+		layer1.forward( &output, input, &context1 ); input.swap( output );
 		o = input;
 		float L = mse( input, ref );
 		return L;
@@ -198,9 +198,9 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 
 	Mat input = mse_backward( o, ref );
 	Mat output;
-	layer1.backward( &output, input, &context1 ); std::swap( input, output );
-	sigmoidLayer.backward( &output, input, &contextS ); std::swap( input, output );
-	layer0.backward( &output, input, &context0 ); std::swap( input, output );
+	layer1.backward( &output, input, &context1 ); input.swap( output );
+	sigmoidLayer.backward( &output, input, &contextS ); input.swap( output );
+	layer0.backward( &output, input, &context0 ); input.swap( output );
 
     // calc numerical derivatives
     Mat dW_numerical( layer0.m_W.row(), layer0.m_W.col() );
