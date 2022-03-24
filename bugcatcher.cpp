@@ -130,7 +130,8 @@ TEST_CASE("AffineLayer foward", "[affine foward]")
 
     Mat x = fromRowMajor(1, 2, { 1, 1 } );
 	LayerContext context;
-	Mat o = layer.forward( x, &context );
+	Mat o;
+	layer.forward( &o, x, &context );
 
     REQUIRE( o( 0, 0 ) == 1 * 1 + 1 * 1 + 1 );
     REQUIRE( o( 1, 0 ) == 1 * 2 + 1 * 4 + 1 );
@@ -141,7 +142,8 @@ TEST_CASE("AffineLayer foward", "[affine foward]")
         2, 3, // data 2
         4, 5, // data 3
     });
-	Mat os = layer.forward( xs, &context );
+	Mat os;
+	layer.forward( &os, xs, &context );
 
     REQUIRE( os( 0, 0 ) == 1 * 1 + 1 * 1 + 1 );
 	REQUIRE( os( 1, 0 ) == 1 * 2 + 1 * 4 + 1 );
@@ -178,8 +180,13 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 
 	auto evalMSE = [&]()
 	{
-		o = layer1.forward( sigmoidLayer.forward( layer0.forward( x, &context0 ), &contextS ), &context1 );
-		float L = mse( o, ref );
+		Mat input = x;
+		Mat output;
+		layer0.forward( &output, input, &context0 ); std::swap( input, output );
+		sigmoidLayer.forward( &output, input, &contextS ); std::swap( input, output );
+		layer1.forward( &output, input, &context1 ); std::swap( input, output );
+		o = input;
+		float L = mse( input, ref );
 		return L;
 	};
 	float mse = evalMSE();
@@ -188,7 +195,12 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 	layer0.setupPropagation();
 	sigmoidLayer.setupPropagation();
 	layer1.setupPropagation();
-	layer0.backward( sigmoidLayer.backward( layer1.backward( mse_backward( o, ref ), &context1 ), &contextS ), &context0 );
+
+	Mat input = mse_backward( o, ref );
+	Mat output;
+	layer1.backward( &output, input, &context1 ); std::swap( input, output );
+	sigmoidLayer.backward( &output, input, &contextS ); std::swap( input, output );
+	layer0.backward( &output, input, &context0 ); std::swap( input, output );
 
     // calc numerical derivatives
     Mat dW_numerical( layer0.m_W.row(), layer0.m_W.col() );
