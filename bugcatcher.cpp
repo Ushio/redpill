@@ -51,7 +51,7 @@ TEST_CASE( "Mat add", "[Mat add]" )
         4, 5, 6,
     });
 	Mat b = fromRowMajor( 1, 3, { 3, 2, 1 } );
-	Mat r = addVectorForEachRow( a, b );
+	addVectorForEachRow( &a, b );
 
     Mat truth = fromRowMajor( 2, 3, { 
         4, 4, 4, 
@@ -59,7 +59,7 @@ TEST_CASE( "Mat add", "[Mat add]" )
     });
 	FOR_EACH_ELEMENT( truth, ix, iy )
 	{
-		REQUIRE( r( ix, iy ) == truth( ix, iy ) );
+		REQUIRE( a( ix, iy ) == truth( ix, iy ) );
 	}
 }
 TEST_CASE( "Mat vertialSum", "[Mat vertialSum]" )

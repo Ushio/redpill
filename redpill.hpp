@@ -220,14 +220,13 @@ namespace rpml
 		} 
 		return r;
 	}
-	inline Mat addVectorForEachRow( const Mat& m, const Mat& v )
+	inline void addVectorForEachRow( Mat *r, const Mat& v )
 	{
-	    Mat r(m.row(), m.col());
-		FOR_EACH_ELEMENT( r, ix, iy )
+		RPML_ASSERT( ( *r ).col() == v.col() );
+		FOR_EACH_ELEMENT( *r, ix, iy )
 	    {
-			r( ix, iy ) = m( ix, iy ) + v( ix, 0 );
+			( *r )( ix, iy ) += v( ix, 0 );
 	    }
-		return r;
 	}
 
 	inline Mat vertialSum( const Mat& m )
@@ -553,9 +552,8 @@ namespace rpml
 		virtual void forward( Mat* r, const Mat& value, LayerContext* context )
 		{
 			context->var( "x" ) = value; // input ( N, input )
-			Mat m;
-			mul( &m, value, m_W );
-			*r = addVectorForEachRow( m, m_b );
+			mul( r, value, m_W );
+			addVectorForEachRow( r, m_b );
 		}
 		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context )
 		{
@@ -835,12 +833,12 @@ namespace rpml
 					case ActivationType::LeakyReLU:
 						activation = std::unique_ptr<Layer>( new LeakyReLULayer( output, output ) );
 						break;
-					//case ActivationType::Tanh:
-					//	activation = std::unique_ptr<Layer>( new TanhLayer( output, output ) );
-					//	break;
-					//case ActivationType::Sigmoid:
-					//	activation = std::unique_ptr<Layer>( new SigmoidLayer( output, output ) );
-					//	break;
+					case ActivationType::Tanh:
+						activation = std::unique_ptr<Layer>( new TanhLayer( output, output ) );
+						break;
+					case ActivationType::Sigmoid:
+						activation = std::unique_ptr<Layer>( new SigmoidLayer( output, output ) );
+						break;
 					default:
 						RPML_ASSERT( 0 );
 					}
