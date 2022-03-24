@@ -131,7 +131,7 @@ int main() {
 
 #if 1
 	MLP mlp( MLPConfig()
-		.shape( { 1, 64, 64, 64, 1 } )
+		.shape( { 1, 128, 128, 128, 1 } )
         .learningRate( 0.01f )
         .initType( InitializationType::He )
 		.activationType( ActivationType::ReLU )
@@ -206,10 +206,10 @@ int main() {
         static StandardRng rng;
 		float loss = 0;
 		int NData = 256 * 16;
+        Mat inputs( NData, 1 );
+		Mat refs( NData, 1 );
         for(int j = 0 ; j < 10 ; ++j)
 		{
-            Mat inputs( NData, 1 );
-		    Mat refs( NData, 1 );
 		    for( int i = 0; i < NData; ++i )
 		    {
                 // if it's freq then need to be carefull range of x?
