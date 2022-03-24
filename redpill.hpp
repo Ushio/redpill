@@ -594,41 +594,10 @@ namespace rpml
 		std::mutex m_dmutex;
 	};
 
-	class ReLULayer : public Layer
-	{
-	public:
-		ReLULayer( int i, int o ) : Layer( i, o ) {}
-
-		virtual void forward( Mat* r, const Mat& value, LayerContext* context )
-		{
-			context->var( "x" ) = value;
-
-			( *r ).setShape( value.row(), value.col() );
-			FOR_EACH_ELEMENT( *r, ix, iy )
-			{
-				float x = value( ix, iy );
-				( *r )( ix, iy ) = maxss( x, 0.0f );
-			}
-		}
-		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context ) 
-		{
-			const Mat& x = context->var( "x" );
-
-			( *r ).setShape( gradient.row(), gradient.col() );
-			FOR_EACH_ELEMENT( gradient, ix, iy )
-			{
-				float d = 0.0f < x( ix, iy ) ? 1.0f : 0.0f;
-				( *r )( ix, iy ) = d * gradient( ix, iy );
-			}
-		}
-		virtual void initialize( InitializationType initType, Rng* rng ) {}
-		virtual void setupPropagation() {}
-		virtual void optimize( int nElement ) {}
-	};
 	class LeakyReLULayer : public Layer
 	{
 	public:
-		LeakyReLULayer( int i, int o ) : Layer( i, o ) { }
+		LeakyReLULayer( int i, int o, float slope ) : Layer( i, o ), m_slope( slope ) {}
 
 		virtual void forward( Mat* r, const Mat& value, LayerContext* context )
 		{
@@ -638,7 +607,7 @@ namespace rpml
 			FOR_EACH_ELEMENT( *r, ix, iy )
 			{
 				float x = value( ix, iy );
-				( *r )( ix, iy ) = 0.0f < x ? x : x * 0.05f;
+				( *r )( ix, iy ) = 0.0f < x ? x : x * m_slope;
 			}
 		}
 		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context )
@@ -648,13 +617,21 @@ namespace rpml
 			( *r ).setShape( gradient.row(), gradient.col() );
 			FOR_EACH_ELEMENT( gradient, ix, iy )
 			{
-				float d = 0.0f < x( ix, iy ) ? 1.0f : 0.05f;
+				float d = 0.0f < x( ix, iy ) ? 1.0f : m_slope;
 				( *r )( ix, iy ) = d * gradient( ix, iy );
 			}
 		}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void setupPropagation() {}
 		virtual void optimize( int nElement ) {}
+
+	private:
+		float m_slope;
+	};
+	class ReLULayer : public LeakyReLULayer
+	{
+	public:
+		ReLULayer( int i, int o ) : LeakyReLULayer( i, o, 0.0f ) {}
 	};
 
 	class SigmoidLayer : public Layer
@@ -840,7 +817,7 @@ namespace rpml
 						activation = std::unique_ptr<Layer>( new ReLULayer( output, output ) );
 						break;
 					case ActivationType::LeakyReLU:
-						activation = std::unique_ptr<Layer>( new LeakyReLULayer( output, output ) );
+						activation = std::unique_ptr<Layer>( new LeakyReLULayer( output, output, 0.05f ) );
 						break;
 					case ActivationType::Tanh:
 						activation = std::unique_ptr<Layer>( new TanhLayer( output, output ) );
