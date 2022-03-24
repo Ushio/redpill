@@ -68,7 +68,8 @@ TEST_CASE( "Mat vertialSum", "[Mat vertialSum]" )
         1, 2, 3, 
         6, 5, 4,
     });
-	Mat r = vertialSum( a );
+	Mat r;
+	vertialSum( &r, a );
 	REQUIRE( r.row() == 1 );
 	REQUIRE( r.col() == 3 );
 
@@ -83,7 +84,8 @@ TEST_CASE( "Mat sliceH", "[Mat sliceH]" )
         6, 5, 4,
         7, 8, 9,
     });
-	Mat r = sliceH( a, 1, 2 );
+	Mat r;
+	sliceH( &r, a, 1, 2 );
 	REQUIRE( r.row() == 1 );
 	REQUIRE( r.col() == 3 );
 	REQUIRE( r( 0, 0 ) == 6 );
@@ -129,7 +131,7 @@ TEST_CASE("AffineLayer foward", "[affine foward]")
     layer.m_b = fromRowMajor(1, 3, { 1, 1, 1 });
 
     Mat x = fromRowMajor(1, 2, { 1, 1 } );
-	LayerContext context;
+	MatContext context;
 	Mat o;
 	layer.forward( &o, x, &context );
 
@@ -168,9 +170,9 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 	layer1.m_W = fromRowMajor( 3, 1, { 0.1, 0.3, 0.8 } );
 	layer1.m_b = fromRowMajor( 1, 1, { 3 } );
 
-	LayerContext context0;
-	LayerContext context1;
-	LayerContext contextS;
+	MatContext context0;
+	MatContext context1;
+	MatContext contextS;
 
     SigmoidLayer sigmoidLayer( 0, 0 );
 

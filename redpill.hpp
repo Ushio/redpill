@@ -197,17 +197,15 @@ namespace rpml
 #endif
 	}
 
-	inline Mat operator+( const Mat& ma, const Mat& mb )
+	inline void add( Mat* r, const Mat& x )
 	{
-		RPML_ASSERT( ma.col() == mb.col() );
-		RPML_ASSERT( ma.row() == mb.row() );
+		RPML_ASSERT( (*r).col() == x.col() );
+		RPML_ASSERT( (*r).row() == x.row() );
 
-		Mat r( ma.row(), ma.col() );
-		FOR_EACH_ELEMENT( r, ix, iy )
+		FOR_EACH_ELEMENT( *r, ix, iy )
 		{
-			r( ix, iy ) = ma( ix, iy ) + mb( ix, iy );
+			( *r )( ix, iy ) += x( ix, iy );
 		}
-		return r;
 	}
 	inline Mat operator-( const Mat& ma, const Mat& mb )
 	{
@@ -239,9 +237,9 @@ namespace rpml
 	    }
 	}
 
-	inline Mat vertialSum( const Mat& m )
+	inline void vertialSum( Mat *r, const Mat& m )
 	{
-		Mat r( 1, m.col() );
+		( *r ).setShape( 1, m.col() );
 		for( int ix = 0; ix < m.col(); ix++ )
 		{
 			float s = 0.0f;
@@ -249,26 +247,24 @@ namespace rpml
 			{
 				s += m( ix, iy );
 			}
-			r( ix, 0 ) = s;
+			( *r )( ix, 0 ) = s;
 		}
-		return r;
 	}
-	inline Mat sliceH( const Mat& x, int beg, int end )
+	inline void sliceH( Mat *r, const Mat& x, int beg, int end )
 	{
 		RPML_ASSERT( 0 <= beg );
 		RPML_ASSERT( end <= x.row() );
 		RPML_ASSERT( beg <= end );
 
 		int localN = end - beg;
-		Mat r( localN, x.col() );
+		( *r ).setShape( localN, x.col() );
 		for( int i = 0; i < localN; i++ )
 		{
 			for( int j = 0; j < x.col(); ++j )
 			{
-				r( j, i ) = x( j, beg + i );
+				( *r )( j, i ) = x( j, beg + i );
 			}
 		}
-		return r;
 	}
 
 	template <class F>
@@ -466,7 +462,7 @@ namespace rpml
 		None,
 		Frequency,
 	};
-	class LayerContext
+	class MatContext
 	{
 	public:
 		Mat& var( const char *name )
@@ -488,8 +484,8 @@ namespace rpml
 		virtual ~Layer() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) = 0;
 		virtual void setupPropagation() = 0;
-		virtual void forward( Mat *r, const Mat& value, LayerContext* context ) = 0;
-		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context ) = 0;
+		virtual void forward( Mat *r, const Mat& value, MatContext* context ) = 0;
+		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) = 0;
 		virtual void optimize( int nElement ) = 0;
 
 		int inputDimensions() const { return m_inputDimensions; }
@@ -559,25 +555,27 @@ namespace rpml
 			m_dW.fill( 0.0f );
 			m_db.fill( 0.0f );
 		}
-		virtual void forward( Mat* r, const Mat& value, LayerContext* context )
+		virtual void forward( Mat* r, const Mat& value, MatContext* context )
 		{
 			context->var( "x" ) = value; // input ( N, input )
 			mul( r, value, m_W );
 			addVectorForEachRow( r, m_b );
 		}
-		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context )
+		virtual void backward( Mat* r, const Mat& gradient, MatContext* context )
 		{
 			const Mat& x = context->var( "x" );
 			Mat& dW = context->var( "dW" );
 			Mat& trx = context->var( "trx" );
 			transpose( &trx, x );
 			mul( &dW, trx, gradient );
-			Mat db = vertialSum( gradient );
+
+			Mat& db = context->var( "db" );
+			vertialSum( &db, gradient );
 
 			{
 				std::lock_guard<std::mutex> lc( m_dmutex );
-				m_dW = m_dW + dW;
-				m_db = m_db + db;
+				add( &m_dW, dW );
+				add( &m_db, db );
 			}
 
 			Mat& trW = context->var( "trW" );
@@ -604,7 +602,7 @@ namespace rpml
 	public:
 		LeakyReLULayer( int i, int o, float slope ) : Layer( i, o ), m_slope( slope ) {}
 
-		virtual void forward( Mat* r, const Mat& value, LayerContext* context )
+		virtual void forward( Mat* r, const Mat& value, MatContext* context )
 		{
 			context->var( "x" ) = value;
 
@@ -615,7 +613,7 @@ namespace rpml
 				( *r )( ix, iy ) = 0.0f < x ? x : x * m_slope;
 			}
 		}
-		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context )
+		virtual void backward( Mat* r, const Mat& gradient, MatContext* context )
 		{
 			const Mat& x = context->var( "x" );
 
@@ -643,7 +641,7 @@ namespace rpml
 	{
 	public:
 		SigmoidLayer( int i, int o ) : Layer( i, o ) {}
-		virtual void forward( Mat* r, const Mat& value, LayerContext* context ) 
+		virtual void forward( Mat* r, const Mat& value, MatContext* context ) 
 		{
 			(*r).setShape( value.row(), value.col() );
 			FOR_EACH_ELEMENT( *r, ix, iy )
@@ -653,7 +651,7 @@ namespace rpml
 			}
 			context->var( "y" ) = ( *r );
 		}
-		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context )
+		virtual void backward( Mat* r, const Mat& gradient, MatContext* context )
 		{
 			const Mat& y = context->var( "y" );
 
@@ -672,7 +670,7 @@ namespace rpml
 	{
 	public:
 		TanhLayer( int i, int o ) : Layer( i, o ) {}
-		virtual void forward( Mat* r, const Mat& value, LayerContext* context )
+		virtual void forward( Mat* r, const Mat& value, MatContext* context )
 		{
 			( *r ).setShape( value.row(), value.col() );
 			FOR_EACH_ELEMENT( *r, ix, iy )
@@ -682,7 +680,7 @@ namespace rpml
 			}
 			context->var( "y" ) = ( *r );
 		}
-		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context )
+		virtual void backward( Mat* r, const Mat& gradient, MatContext* context )
 		{
 			const Mat& y = context->var( "y" );
 
@@ -729,7 +727,7 @@ namespace rpml
 		}
 		FrequencyEncoder( int i, int o, const Config& config ) : Layer( i, o ), m_config( config ) {}
 
-		virtual void forward( Mat* r, const Mat& value, LayerContext* context )
+		virtual void forward( Mat* r, const Mat& value, MatContext* context )
 		{
 			( *r ).setShape( value.row(), outputDimensions() );
 			FOR_EACH_ELEMENT( value, ix, iy )
@@ -746,7 +744,7 @@ namespace rpml
 				}
 			}
 		}
-		virtual void backward( Mat* r, const Mat& gradient, LayerContext* context ) { }
+		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) { }
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void setupPropagation() {}
 		virtual void optimize( int nElement ) {}
@@ -784,7 +782,8 @@ namespace rpml
 
 	struct LocalStorage
 	{
-		std::vector<LayerContext> layerContexts;
+		MatContext context;
+		std::vector<MatContext> layerContexts;
 	};
 
 	class MLP
@@ -876,10 +875,12 @@ namespace rpml
 				}
 				localStorage->layerContexts.resize( m_layers.size() );
 
-				Mat inputMat = sliceH( x, beg, end );
-				Mat outputMat;
+				Mat& inputMat = localStorage->context.var( "inputMat" );
+				Mat& outputMat = localStorage->context.var( "outputMat" );
+				Mat& slicedY = localStorage->context.var( "slicedY" );
 
-				Mat slicedY = sliceH( y, beg, end );
+				sliceH( &inputMat, x, beg, end );
+				sliceH( &slicedY, y, beg, end );
 				
 				for( int i = 0; i < m_layers.size(); i++ )
 				{
@@ -918,41 +919,17 @@ namespace rpml
 				m_layers[i]->optimize( nElement );
 			}
 
-			//std::vector<LayerContext> layerContexts( m_layers.size() );
-			//Mat m = x;
-			//for( int i = 0; i < m_layers.size(); i++ )
-			//{
-			//	RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
-			//	m = m_layers[i]->forward( m, &layerContexts[i] );
-			//	RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
-			//}
-
-			//// m: estimated result
-			//float loss = mse( m, y );
-
-			//m = mse_backward( m, y );
-			//for( int i = (int)m_layers.size() - 1; 0 <= i; i-- )
-			//{
-			//	RPML_ASSERT( m.col() == m_layers[i]->outputDimensions() );
-			//	m = m_layers[i]->backward( m, &layerContexts[i] );
-			//	RPML_ASSERT( m.col() == m_layers[i]->inputDimensions() );
-			//}
-			//for( int i = 0; i < m_layers.size(); i++ )
-			//{
-			//	m_layers[i]->optimize( nElement );
-			//}
-
 			return loss;
 		}
 		Mat forward( const Mat& x )
 		{
-			std::vector<LayerContext> layerContexts( m_layers.size() );
+			std::vector<MatContext> MatContexts( m_layers.size() );
 			Mat inputMat = x;
 			Mat outputMat;
 			for( int i = 0; i < m_layers.size(); i++ )
 			{
 				RPML_ASSERT( inputMat.col() == m_layers[i]->inputDimensions() );
-				m_layers[i]->forward( &outputMat, inputMat, &layerContexts[i] );
+				m_layers[i]->forward( &outputMat, inputMat, &MatContexts[i] );
 				RPML_ASSERT( outputMat.col() == m_layers[i]->outputDimensions() );
 				inputMat.swap( outputMat );
 			}
