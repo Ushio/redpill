@@ -776,6 +776,12 @@ namespace rpml
 		PROP( frequencyEncoderConfig );
 #undef PROP
 	};
+
+	struct LocalStorage
+	{
+		std::vector<LayerContext> layerContexts;
+	};
+
 	class MLP
 	{
 	public:
@@ -853,7 +859,17 @@ namespace rpml
 			g.addElements( nElement );
 			m_pool.enqueueFor( nElement, 2, [&]( int64_t beg, int64_t end ) 
 			{
-				std::vector<LayerContext> layerContexts( m_layers.size() );
+				std::shared_ptr<LocalStorage> localStorage;
+				{
+					std::lock_guard<std::mutex> lc( m_localMutex );
+					auto tid = std::this_thread::get_id();
+					if( m_localStorages.count( tid ) == 0 )
+					{
+						m_localStorages[tid] = std::shared_ptr<LocalStorage>( new LocalStorage() );
+					}
+					localStorage = m_localStorages[tid];
+				}
+				localStorage->layerContexts.resize( m_layers.size() );
 
 				Mat inputMat = sliceH( x, beg, end );
 				Mat outputMat;
@@ -863,7 +879,7 @@ namespace rpml
 				for( int i = 0; i < m_layers.size(); i++ )
 				{
 					RPML_ASSERT( inputMat.col() == m_layers[i]->inputDimensions() );
-					m_layers[i]->forward( &outputMat, inputMat, &layerContexts[i] );
+					m_layers[i]->forward( &outputMat, inputMat, &localStorage->layerContexts[i] );
 					RPML_ASSERT( outputMat.col() == m_layers[i]->outputDimensions() );
 					inputMat.swap( outputMat );
 				}
@@ -880,7 +896,7 @@ namespace rpml
 				for( int i = (int)m_layers.size() - 1; 0 <= i; i-- )
 				{
 					RPML_ASSERT( inputMat.col() == m_layers[i]->outputDimensions() );
-					m_layers[i]->backward( &outputMat, inputMat, &layerContexts[i] );
+					m_layers[i]->backward( &outputMat, inputMat, &localStorage->layerContexts[i] );
 
 					if( i != 0 )
 					{
@@ -940,5 +956,7 @@ namespace rpml
 		std::vector<std::unique_ptr<Layer>> m_layers;
 		std::unique_ptr<Rng> m_rng;
 		pr::ThreadPool m_pool;
+		std::map<std::thread::id, std::shared_ptr<LocalStorage>> m_localStorages;
+		std::mutex m_localMutex;
 	};
 } // namespace rpml
