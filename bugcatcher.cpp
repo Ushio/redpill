@@ -36,7 +36,8 @@ TEST_CASE("Mat multiply", "[multiply]") {
        -15, 19, 2
     });
 
-    Mat ab = a * b;
+    Mat ab;
+	mul( &ab, a, b );
 
     FOR_EACH_ELEMENT( truth, ix, iy )
     {
@@ -89,7 +90,7 @@ TEST_CASE( "Mat sliceH", "[Mat sliceH]" )
 	REQUIRE( r( 1, 0 ) == 5 );
 	REQUIRE( r( 2, 0 ) == 4 );
 }
-
+#if ENABLE_SIMD
 TEST_CASE( "Mat simd", "[Mat simd]" )
 {
 	StandardRng rng;
@@ -106,14 +107,17 @@ TEST_CASE( "Mat simd", "[Mat simd]" )
 		{
 			mb( ix, iy ) = rng.draw();
 		}
-		Mat m = mul( ma, mb );
-		Mat m_simd = mulSIMD( ma, mb );
+		Mat m;
+		mulNaive( &m, ma, mb );
+		Mat m_simd;
+		mulSIMD( &m_simd, ma, mb );
 		FOR_EACH_ELEMENT( m, ix, iy )
 		{
 			REQUIRE( m( ix, iy ) == Approx( m_simd( ix, iy ) ).margin( 0.0000001f ) );
 		}
 	}
 }
+#endif
 
 TEST_CASE("AffineLayer foward", "[affine foward]") 
 {

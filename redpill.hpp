@@ -21,6 +21,12 @@
 	for( int ix = 0; ix < ( m ).col(); ix++ ) \
 		for( int iy = 0; iy < ( m ).row(); iy++ )
 
+#define ENABLE_SIMD 1
+
+#if ENABLE_SIMD
+#include <immintrin.h>
+#endif
+
 namespace rpml
 {
 	const float pi = 3.14159265358979323846f;
@@ -62,14 +68,27 @@ namespace rpml
 			}
 		};
 
-		void reinit( int row, int col )
+		void setShape( int row, int col )
 		{
+			if( m_row == row && m_col == col )
+			{
+				return;
+			}
+
 			m_row = row;
 			m_paddedRow = next_multiple( row, ROW_MULTIPLE );
 			m_col = col;
 			m_data.clear();
 			m_data.resize( col * m_paddedRow );
 		}
+		void fill( float x )
+		{
+			for( int i = 0; i < m_data.size(); i++ )
+			{
+				m_data[i] = x ;
+			}
+		}
+
 		float& operator()( int x, int y )
 		{
 			RPML_ASSERT( 0 <= y && y < m_row );
@@ -111,12 +130,13 @@ namespace rpml
 		return Mat( row, col, init );
 	}
 
-	inline Mat mul( const Mat& ma, const Mat& mb )
+	inline void mulNaive( Mat *r, const Mat& ma, const Mat& mb )
 	{
 		RPML_ASSERT( ma.col() == mb.row() );
 
-		Mat r( ma.row(), mb.col() );
-		FOR_EACH_ELEMENT( r, ix, iy )
+		( *r ).setShape( ma.row(), mb.col() );
+
+		FOR_EACH_ELEMENT( ( *r ), ix, iy )
 		{
 			const int n = ma.col();
 			float v = 0.0f;
@@ -124,20 +144,22 @@ namespace rpml
 			{
 				v += ma( i, iy ) * mb( ix, i );
 			}
-			r( ix, iy ) = v;
+			( *r )( ix, iy ) = v;
 		}
-		return r;
 	}
-	inline Mat mulSIMD( const Mat& ma, const Mat& mb )
+
+#if ENABLE_SIMD
+	inline void mulSIMD( Mat* r, const Mat& ma, const Mat& mb )
 	{
 		RPML_ASSERT( ma.col() == mb.row() );
 
-		Mat r( ma.row(), mb.col() );
+		( *r ).setShape( ma.row(), mb.col() );
+
 		int ix = 0;
-		while( ix < r.col() )
+		while( ix < ( *r ).col() )
 		{
 			int iy = 0;
-			while( iy < r.row() )
+			while( iy < ( *r ).row() )
 			{
 				__m256 v = _mm256_setzero_ps();
 
@@ -149,19 +171,19 @@ namespace rpml
 					v = _mm256_fmadd_ps( lhs, rhs, v );
 				}
 
-				_mm256_storeu_ps( &r( ix, iy ), v );
+				_mm256_storeu_ps( &( ( *r )( ix, iy ) ), v );
 				iy += 8;
 			}
 			ix++;
 		}
-		return r;
 	}
-	inline Mat operator*( const Mat& ma, const Mat& mb )
+#endif
+	inline void mul( Mat* r, const Mat& ma, const Mat& mb )
 	{
-#if 0
-		return mul( ma, mb );
+#if ENABLE_SIMD
+		mulSIMD( r, ma, mb );
 #else 
-		return mulSIMD( ma, mb );
+		mulNaive( r, ma, mb );
 #endif
 	}
 
@@ -293,8 +315,10 @@ namespace rpml
 		}
 		virtual void initialize( int row, int col )
 		{
-			m_m.reinit( row, col );
-			m_v.reinit( row, col );
+			m_m.setShape( row, col );
+			m_v.setShape( row, col );
+			m_m.fill( 0.0f );
+			m_v.fill( 0.0f );
 		}
 		virtual void optimize( Mat* parameter, const Mat& gradient, int nElement )
 		{
@@ -521,18 +545,23 @@ namespace rpml
 		}
 		virtual void setupPropagation()
 		{
-			m_dW.reinit( m_W.row(), m_W.col() );
-			m_db.reinit( m_b.row(), m_b.col() );
+			m_dW.setShape( m_W.row(), m_W.col() );
+			m_db.setShape( m_b.row(), m_b.col() );
+			m_dW.fill( 0.0f );
+			m_db.fill( 0.0f );
 		}
 		virtual Mat forward( const Mat& value, LayerContext* context )
 		{
 			context->var( "x" ) = value; // input ( N, input )
-			return addVectorForEachRow( value * m_W, m_b );
+			Mat m;
+			mul( &m, value, m_W );
+			return addVectorForEachRow( m, m_b );
 		}
 		virtual Mat backward( const Mat& gradient, LayerContext* context )
 		{
 			const Mat& x = context->var( "x" );
-			Mat dW = transpose( x ) * gradient;
+			Mat dW;
+			mul( &dW, transpose( x ), gradient );
 			Mat db = vertialSum( gradient );
 
 			{
@@ -541,7 +570,9 @@ namespace rpml
 				m_db = m_db + db;
 			}
 
-			return gradient * transpose( m_W );
+			Mat m;
+			mul( &m, gradient, transpose( m_W ) );
+			return m;
 		}
 		virtual void optimize( int nElement ) 
 		{
