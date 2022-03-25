@@ -131,9 +131,10 @@ int main() {
 
 #if 1
 	MLP mlp( MLPConfig()
-		.shape( { 1, 128, 128, 128, 1 } )
+		.shape( { 1, 64, 64, 1 } )
         .learningRate( 0.01f )
         .initType( InitializationType::He )
+		.optimType( OptimizerType::Adam )
 		.activationType( ActivationType::ReLU )
         .encoderType( EncoderType::Frequency )
     );
@@ -205,9 +206,9 @@ int main() {
         // Batch 
         static StandardRng rng;
 		float loss = 0;
-		int NData = 256 * 16;
-        Mat inputs( NData, 1 );
-		Mat refs( NData, 1 );
+		int NData = 256 * 128;
+		static Mat inputs( NData, 1 );
+		static Mat refs( NData, 1 );
         for(int j = 0 ; j < 10 ; ++j)
 		{
 		    for( int i = 0; i < NData; ++i )

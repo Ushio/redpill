@@ -207,27 +207,17 @@ namespace rpml
 			( *r )( ix, iy ) += x( ix, iy );
 		}
 	}
-	inline Mat operator-( const Mat& ma, const Mat& mb )
+	inline void sub( Mat* r, const Mat& x )
 	{
-		RPML_ASSERT( ma.col() == mb.col() );
-		RPML_ASSERT( ma.row() == mb.row() );
+		RPML_ASSERT( ( *r ).col() == x.col() );
+		RPML_ASSERT( ( *r ).row() == x.row() );
 
-		Mat r( ma.row(), ma.col() );
-		FOR_EACH_ELEMENT( r, ix, iy )
+		FOR_EACH_ELEMENT( *r, ix, iy )
 		{
-			r( ix, iy ) = ma( ix, iy ) - mb( ix, iy );
+			( *r )( ix, iy ) -= x( ix, iy );
 		}
-		return r;
 	}
-	inline Mat multiplyScalar( const Mat& m, float s )
-	{
-		Mat r( m.row(), m.col() );
-		FOR_EACH_ELEMENT( r, ix, iy )
-		{
-			r( ix, iy ) = m( ix, iy ) * s;
-		} 
-		return r;
-	}
+
 	inline void addVectorForEachRow( Mat *r, const Mat& v )
 	{
 		RPML_ASSERT( ( *r ).col() == v.col() );
@@ -267,16 +257,6 @@ namespace rpml
 		}
 	}
 
-	template <class F>
-	Mat apply( const Mat& m, F f )
-	{
-		Mat r( m.row(), m.col() );
-		FOR_EACH_ELEMENT( r, ix, iy )
-		{
-			r( ix, iy ) = f( m( ix, iy ) );
-		}
-		return r;
-	}
 	inline float minss( float a, float b )
 	{
 		return ( a < b ) ? a : b;
@@ -306,7 +286,11 @@ namespace rpml
 		}
 		virtual void optimize( Mat* parameter, const Mat& gradient, int nElement )
 		{
-			*parameter = *parameter - multiplyScalar( gradient, m_alpha / nElement );
+			float s = m_alpha / nElement;
+			FOR_EACH_ELEMENT( ( *parameter ), ix, iy )
+			{
+				( *parameter )( ix, iy ) -= gradient( ix, iy ) * s;
+			}
 		}
 	private:
 		float m_alpha;
@@ -709,10 +693,6 @@ namespace rpml
 		}
 		return e;
 	}
-	inline Mat mse_backward( const Mat& output, const Mat& ref )
-	{
-		return output - ref;
-	}
 
 	class FrequencyEncoder : public Layer
 	{
@@ -897,7 +877,8 @@ namespace rpml
 					loss += L;
 				}
 
-				inputMat = mse_backward( inputMat, slicedY );
+				// MSE backward is "x - y"
+				sub( &inputMat, slicedY );
 
 				for( int i = (int)m_layers.size() - 1; 0 <= i; i-- )
 				{
