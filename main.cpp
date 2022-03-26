@@ -110,13 +110,152 @@ void print( const Mat& m )
     }
 }
 
-//Mat fromJson( const nlohmann::json& j )
-//{
-//    int row = j["row"].get<int>();
-//    int col = j["col"].get<int>();
-//    std::vector<float> data = j["data"].get<std::vector<float>>();
-//    return Mat(row, col, data);
-//}
+#if 1
+int main()
+{
+	using namespace pr;
+
+	SetDataDir( ExecutableDir() );
+
+	Image2DRGBA8 image;
+	//image.load( "img/small_albert.jpg" );
+	image.load( "img/coyote.jpg" );
+	Image2DRGBA8 estimatedImage;
+	estimatedImage.allocate( image.width(), image.height() );
+
+	ITexture *texture = CreateTexture();
+
+	MLP mlp( MLPConfig()
+				 .shape( { 2, 64, 64, 3 } )
+				 .learningRate( 0.01f )
+				 .initType( InitializationType::He )
+				 .optimType( OptimizerType::Adam )
+				 .activationType( ActivationType::ReLU )
+				 .encoderType( EncoderType::Frequency ) );
+
+
+	Config config;
+	config.ScreenWidth = 1500;
+	config.ScreenHeight = 1200;
+	config.SwapInterval = 0;
+	Initialize( config );
+
+	Camera3D camera;
+	camera.origin = { 0, 0, 4 };
+	camera.lookat = { 0, 0, 0 };
+	camera.zUp = false;
+
+	double e = GetElapsedTime();
+
+	static float learning = 0.005f;
+
+	while( pr::NextFrame() == false )
+	{
+		if( IsImGuiUsingMouse() == false )
+		{
+			UpdateCameraBlenderLike( &camera );
+		}
+
+		ClearBackground( 0.1f, 0.1f, 0.1f, 1 );
+
+		BeginCamera( camera );
+
+		PushGraphicState();
+
+		DrawGrid( GridAxis::XY, 1.0f, 10, { 128, 128, 128 } );
+		DrawXYZAxis( 1.0f );
+
+		// Batch
+		static StandardRng rng;
+		float loss = 0;
+		int NData = 256 * 16;
+		static Mat inputs( NData, 2 );
+		static Mat refs( NData, 3 );
+
+		Stopwatch sw_train;
+		for( int j = 0; j < 100; ++j )
+		{
+			for( int i = 0; i < NData; ++i )
+			{
+				// if it's freq then need to be carefull range of x?
+				float u = rng.draw();
+				float v = rng.draw(); 
+				int ui = (int)glm::mix( 0.0f, (float)image.width(), u );
+				int vi = (int)glm::mix( 0.0f, (float)image.height(), v );
+				glm::uvec3 y = image( ui, vi );
+				inputs( 0, i ) = u;
+				inputs( 1, i ) = v;
+				refs( 0, i ) = y.x / 255.0f;
+				refs( 1, i ) = y.y / 255.0f;
+				refs( 2, i ) = y.z / 255.0f;
+			}
+			loss = mlp.train( inputs, refs );
+		}
+		float sTrained = sw_train.elapsed();
+
+
+		static Mat inUVs( estimatedImage.width() * estimatedImage.height(), 2 );
+		static Mat outPixels;
+
+		Stopwatch sw_estimate;
+
+		for( int yi = 0; yi < estimatedImage.height(); yi++ )
+		{
+			for( int xi = 0; xi < estimatedImage.width(); xi++ )
+			{
+				int i = yi * estimatedImage.width() + xi;
+				inUVs( 0, i ) = ( xi + 0.5f ) / image.width();
+				inUVs( 1, i ) = ( yi + 0.5f ) / image.height();
+			}
+		}
+
+		mlp.forwardMT( &outPixels, inUVs );
+
+		float sEstimate = sw_estimate.elapsed();
+
+		for( int yi = 0; yi < estimatedImage.height(); yi++ )
+		{
+			for( int xi = 0; xi < estimatedImage.width(); xi++ )
+			{
+				int i = yi * estimatedImage.width() + xi;
+				estimatedImage( xi, yi ) = glm::uvec4(
+					glm::clamp<int>( outPixels( 0, i ) * 255.0f, 0, 255 ),
+					glm::clamp<int>( outPixels( 1, i ) * 255.0f, 0, 255 ),
+					glm::clamp<int>( outPixels( 2, i ) * 255.0f, 0, 255 ),
+					255
+				);
+			}
+		}
+		texture->upload( estimatedImage );
+
+		PopGraphicState();
+		EndCamera();
+
+		BeginImGui();
+
+		ImGui::SetNextWindowSize( { 1200, 1200 }, ImGuiCond_Once );
+		ImGui::Begin( "Panel" );
+		ImGui::Text( "fps = %f", GetFrameRate() );
+		ImGui::Text( "mse = %.10f", loss / NData );
+		ImGui::Text( "%f s train", sTrained );
+		ImGui::Text( "%f s estimate", sEstimate );
+		
+		static float scale = 1.0f;
+		ImGui::SliderFloat( "scale", &scale, 0, 1 );
+		float w = texture->width() * scale;
+		float h = texture->height() * scale;
+		ImGui::Image( texture, ImVec2( w, h ) );
+
+		ImGui::End();
+
+		EndImGui();
+	}
+
+	pr::CleanUp();
+}
+#endif
+
+#if 0
 
 float f( float x )
 {
@@ -129,7 +268,6 @@ int main() {
 
     SetDataDir(ExecutableDir());
 
-#if 1
 	MLP mlp( MLPConfig()
 		.shape( { 1, 64, 64, 1 } )
         .learningRate( 0.01f )
@@ -139,16 +277,8 @@ int main() {
         .encoderType( EncoderType::Frequency )
     );
 
-  //  auto rng = new StandardRng();
-  //  BoxMular box( rng );
-  //  for (int i = 0; i < 10000 ; ++i )
-  //  {
-  //      printf("%f\n", box.draw());
-		////printf( "%f\n", rng->draw() );
-  //  }
 
-
- //   for( ;; )
+	//for( ;; )
 	//{
 	//	static StandardRng rng;
 	//	Mat ma( 129, 129 );
@@ -175,7 +305,7 @@ int main() {
 	Config config;
 	config.ScreenWidth = 1920;
 	config.ScreenHeight = 1080;
-	config.SwapInterval = 1;
+	config.SwapInterval = 0;
 	Initialize( config );
 
 	Camera3D camera;
@@ -206,9 +336,11 @@ int main() {
         // Batch 
         static StandardRng rng;
 		float loss = 0;
-		int NData = 256 * 128;
+		int NData = 256 * 64;
 		static Mat inputs( NData, 1 );
 		static Mat refs( NData, 1 );
+
+        Stopwatch sw;
         for(int j = 0 ; j < 10 ; ++j)
 		{
 		    for( int i = 0; i < NData; ++i )
@@ -221,6 +353,7 @@ int main() {
 		    }
 			loss = mlp.train( inputs, refs );
         }
+		float msTrained = sw.elapsed();
 
         int N = 512;
 		LinearTransform i2x( 0, N, 0, 1 );
@@ -234,13 +367,15 @@ int main() {
 		PrimEnd();
 
 
-        Mat estimateInputs( N, 1 );
+        static Mat estimateInputs( N, 1 );
+		static Mat estimated;
+
 		for( int i = 0; i < N; ++i )
 		{
 			float x = i2x( i );
 			estimateInputs( 0, i ) = x;
 		}
-		Mat estimated = mlp.forward( estimateInputs );
+		mlp.forward( &estimated, estimateInputs );
 		PrimBegin( PrimitiveMode::LineStrip, 2 );
 		for( int i = 0; i < N; ++i )
 		{
@@ -259,168 +394,14 @@ int main() {
 		ImGui::Begin( "Panel" );
 		ImGui::Text( "fps = %f", GetFrameRate() );
 		ImGui::Text( "mse = %.10f", loss / NData );
-
+		ImGui::Text( "%f s train", msTrained );
 		ImGui::End();
 
 		EndImGui();
 	}
 
 	pr::CleanUp();
-#endif
 
-#if 0
-    nlohmann::json sample_weight;
-    {
-        std::ifstream ifs(GetDataPath("sample_weight.json"));
-        ifs >> sample_weight;
-    }
-
-    Mat w1 = fromJson(sample_weight["W1"]);
-    Mat w2 = fromJson(sample_weight["W2"]);
-    Mat w3 = fromJson(sample_weight["W3"]);
-    Mat b1 = fromJson(sample_weight["b1"]);
-    Mat b2 = fromJson(sample_weight["b2"]);
-    Mat b3 = fromJson(sample_weight["b3"]);
-
-    Mat x(1, 2, { 1.0f, 0.5f });
-    Mat y(2, 3, { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f });
-    Mat b(1, 3, { 0.1f, 0.2f, 0.3f });
-
-    //Mat x(2, 2, { 1, 3, 2, 4 });
-    //Mat y(2, 2, { 5, 7, 6, 8 });
-    Mat a = apply( x * y + b, sigmoid );
-
-    print(x);
-    printf("\n");
-    print(y);
-    printf("\n");
-    print(a);
-
-    auto bitpair = { std::make_pair(0, 0),  std::make_pair(0, 1), std::make_pair(1, 0), std::make_pair(1, 1) };
-
-    printf("nnAnd 0, 0 => %f\n", nnAnd(0, 0));
-    printf("nnAnd 1, 0 => %f\n", nnAnd(1, 0));
-    printf("nnAnd 0, 1 => %f\n", nnAnd(0, 1));
-    printf("nnAnd 1, 1 => %f\n", nnAnd(1, 1));
-
-    printf("\n");
-
-    printf("nnNand 0, 0 => %f\n", nnNand(0, 0));
-    printf("nnNand 1, 0 => %f\n", nnNand(1, 0));
-    printf("nnNand 0, 1 => %f\n", nnNand(0, 1));
-    printf("nnNand 1, 1 => %f\n", nnNand(1, 1));
-
-    printf("\n");
-
-    for (auto b : bitpair)
-    {
-        printf("nnOr %d, %d => %f\n", b.first, b.second, nnOr(b.first, b.second));
-    }
-
-    printf("\n");
-
-    for( auto b : bitpair )
-    {
-        printf("nnXor %d, %d => %f\n", b.first, b.second, nnXor(b.first, b.second));
-    }
-
-    //std::vector<float> xs(100);
-    //std::vector<float> ys(100);
-    //LinearTransform i2x(0, 100, -5, 5);
-    //for (int i = 0; i < 100; i++)
-    //{
-    //    xs[i] = i2x(i);
-    //    ys[i] = sigmoid(xs[i]);
-    //}
-
-    //Plot plot;
-    //// Plot the Bessel functions                                                                                        
-    //plot.drawCurve(xs, ys).label("y");
-
-    //// Show the plot in a pop-up window
-    //plot.show();
-
-    Config config;
-    config.ScreenWidth = 1920;
-    config.ScreenHeight = 1080;
-    config.SwapInterval = 1;
-    Initialize(config);
-
-    Camera3D camera;
-    camera.origin = { 4, 4, 4 };
-    camera.lookat = { 0, 0, 0 };
-    camera.zUp = true;
-
-    double e = GetElapsedTime();
-
-    std::vector<Image2DMono8> imgs(10);
-    for (int i = 0; i < 10; i++)
-    {
-        char name[128];
-        sprintf(name, "img/img%02d.png", i);
-        imgs[i].load(name);
-    }
-    ITexture *imgTex = CreateTexture();
-    int imgIndex = 0;
-
-    while (pr::NextFrame() == false) {
-        if (IsImGuiUsingMouse() == false) {
-            UpdateCameraBlenderLike(&camera);
-        }
-
-        ClearBackground(0.1f, 0.1f, 0.1f, 1);
-
-        BeginCamera(camera);
-
-        PushGraphicState();
-
-        DrawGrid(GridAxis::XY, 1.0f, 10, { 128, 128, 128 });
-        DrawXYZAxis(1.0f);
-
-        PopGraphicState();
-        EndCamera();
-
-        BeginImGui();
-
-        ImGui::SetNextWindowSize({ 500, 800 }, ImGuiCond_Once);
-        ImGui::Begin("Panel");
-        ImGui::Text("fps = %f", GetFrameRate());
-
-        ImGui::InputInt("index", &imgIndex);
-        imgIndex = glm::clamp(imgIndex, 0, 9);
-        imgTex->upload(imgs[imgIndex]);
-        ImGui::Image(imgTex, ImVec2(100, 100));
-
-        const Image2DMono8 &src = imgs[imgIndex];
-        Mat x( 1, 28 * 28 );
-        for( int i = 0; i < src.height(); i++ )
-        {
-            for (int j = 0; j < src.width(); j++)
-            {
-				x( j * 28 + i, 0 ) = (float)src( i, j ) / 255.0f;
-            }
-        }
-
-        Mat a = x;
-        a = apply( a * w1 + b1, sigmoid );
-        a = apply( a * w2 + b2, sigmoid );
-        a = apply( a * w3 + b3, sigmoid );
-        Mat result = nnSoftmax( a );
-        int theIndex = nnMaxIndex(result).first;
-
-        for (int i = 0; i < 10; i++)
-        {
-            ImVec4 white(1, 1, 1, 1);
-            ImVec4 red(1, 0, 0, 1);
-            ImGui::TextColored(i == theIndex ? red : white, "[%d] = %.4f", i, result(i, 0));
-        }
-
-        ImGui::End();
-
-        EndImGui();
-    }
-
-    pr::CleanUp();
-
-#endif
 }
+
+#endif

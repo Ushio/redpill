@@ -79,18 +79,37 @@ TEST_CASE( "Mat vertialSum", "[Mat vertialSum]" )
 }
 TEST_CASE( "Mat sliceH", "[Mat sliceH]" )
 {
-    Mat a = fromRowMajor( 3, 3, { 
+    Mat a = fromRowMajor( 4, 3, { 
         1, 2, 3, 
         6, 5, 4,
         7, 8, 9,
+		0, 1, 2
     });
-	Mat r;
-	sliceH( &r, a, 1, 2 );
-	REQUIRE( r.row() == 1 );
-	REQUIRE( r.col() == 3 );
-	REQUIRE( r( 0, 0 ) == 6 );
-	REQUIRE( r( 1, 0 ) == 5 );
-	REQUIRE( r( 2, 0 ) == 4 );
+	Mat s1;
+	sliceH( &s1, a, 1, 2 );
+
+	Mat s0, s2;
+	sliceH( &s0, a, 0, 1 );
+	sliceH( &s2, a, 2, 4 );
+
+	REQUIRE( s1.row() == 1 );
+	REQUIRE( s1.col() == 3 );
+	REQUIRE( s1( 0, 0 ) == 6 );
+	REQUIRE( s1( 1, 0 ) == 5 );
+	REQUIRE( s1( 2, 0 ) == 4 );
+
+	REQUIRE( s0( 0, 0 ) == 1 );
+	REQUIRE( s2( 2, 1 ) == 2 );
+
+	Mat b( 4, 3 );
+	concatH( &b, s0, 0, 1 );
+	concatH( &b, s1, 1, 2 );
+	concatH( &b, s2, 2, 4 );
+
+	FOR_EACH_ELEMENT( a, ix, iy )
+	{
+		REQUIRE( a( ix, iy ) == b( ix, iy ) );
+	}
 }
 #if ENABLE_SIMD
 TEST_CASE( "Mat simd", "[Mat simd]" )

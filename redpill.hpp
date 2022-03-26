@@ -80,7 +80,6 @@ namespace rpml
 			m_row = row;
 			m_paddedRow = next_multiple( row, ROW_MULTIPLE );
 			m_col = col;
-			m_data.clear();
 			m_data.resize( col * m_paddedRow );
 		}
 		void fill( float x )
@@ -253,6 +252,22 @@ namespace rpml
 			for( int j = 0; j < x.col(); ++j )
 			{
 				( *r )( j, i ) = x( j, beg + i );
+			}
+		}
+	}
+	inline void concatH( Mat* r, const Mat& x, int beg, int end )
+	{
+		RPML_ASSERT( 0 <= beg );
+		RPML_ASSERT( end <= ( *r ).row() );
+		RPML_ASSERT( beg <= end );
+		RPML_ASSERT( x.row() == end - beg );
+
+		int localN = end - beg;
+		for( int i = 0; i < localN; i++ )
+		{
+			for( int j = 0; j < x.col(); ++j )
+			{
+				( *r )( j, beg + i ) = x( j, i );
 			}
 		}
 	}
@@ -468,7 +483,7 @@ namespace rpml
 		virtual ~Layer() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) = 0;
 		virtual void setupPropagation() = 0;
-		virtual void forward( Mat *r, const Mat& value, MatContext* context ) = 0;
+		virtual void forward( Mat* r, const Mat& value, MatContext* context /* optional */ ) = 0;
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) = 0;
 		virtual void optimize( int nElement ) = 0;
 
@@ -539,9 +554,12 @@ namespace rpml
 			m_dW.fill( 0.0f );
 			m_db.fill( 0.0f );
 		}
-		virtual void forward( Mat* r, const Mat& value, MatContext* context )
+		virtual void forward( Mat* r, const Mat& value, MatContext* context /* optional */ )
 		{
-			context->var( "x" ) = value; // input ( N, input )
+			if( context )
+			{
+				context->var( "x" ) = value; // input ( N, input )
+			}
 			mul( r, value, m_W );
 			addVectorForEachRow( r, m_b );
 		}
@@ -586,9 +604,12 @@ namespace rpml
 	public:
 		LeakyReLULayer( int i, int o, float slope ) : Layer( i, o ), m_slope( slope ) {}
 
-		virtual void forward( Mat* r, const Mat& value, MatContext* context )
+		virtual void forward( Mat* r, const Mat& value, MatContext* context /* optional */ )
 		{
-			context->var( "x" ) = value;
+			if( context )
+			{
+				context->var( "x" ) = value;
+			}
 
 			( *r ).setShape( value.row(), value.col() );
 			FOR_EACH_ELEMENT( *r, ix, iy )
@@ -625,7 +646,7 @@ namespace rpml
 	{
 	public:
 		SigmoidLayer( int i, int o ) : Layer( i, o ) {}
-		virtual void forward( Mat* r, const Mat& value, MatContext* context ) 
+		virtual void forward( Mat* r, const Mat& value, MatContext* context /* optional */ ) 
 		{
 			(*r).setShape( value.row(), value.col() );
 			FOR_EACH_ELEMENT( *r, ix, iy )
@@ -633,7 +654,10 @@ namespace rpml
 				float x = value( ix, iy );
 				( *r )( ix, iy ) = 1.0f / ( 1.0f + std::exp( -x ) );
 			}
-			context->var( "y" ) = ( *r );
+			if( context )
+			{
+				context->var( "y" ) = ( *r );
+			}
 		}
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context )
 		{
@@ -654,7 +678,7 @@ namespace rpml
 	{
 	public:
 		TanhLayer( int i, int o ) : Layer( i, o ) {}
-		virtual void forward( Mat* r, const Mat& value, MatContext* context )
+		virtual void forward( Mat* r, const Mat& value, MatContext* context /* optional */ )
 		{
 			( *r ).setShape( value.row(), value.col() );
 			FOR_EACH_ELEMENT( *r, ix, iy )
@@ -662,7 +686,10 @@ namespace rpml
 				float x = value( ix, iy );
 				( *r )( ix, iy ) = std::tanh( x );
 			}
-			context->var( "y" ) = ( *r );
+			if( context )
+			{
+				context->var( "y" ) = ( *r );
+			}
 		}
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context )
 		{
@@ -843,16 +870,7 @@ namespace rpml
 			g.addElements( nElement );
 			m_pool.enqueueFor( nElement, 2, [&]( int64_t beg, int64_t end ) 
 			{
-				std::shared_ptr<LocalStorage> localStorage;
-				{
-					std::lock_guard<std::mutex> lc( m_localMutex );
-					auto tid = std::this_thread::get_id();
-					if( m_localStorages.count( tid ) == 0 )
-					{
-						m_localStorages[tid] = std::shared_ptr<LocalStorage>( new LocalStorage() );
-					}
-					localStorage = m_localStorages[tid];
-				}
+				std::shared_ptr<LocalStorage> localStorage = acquireLocalStorage();
 				localStorage->layerContexts.resize( m_layers.size() );
 
 				Mat& inputMat = localStorage->context.var( "inputMat" );
@@ -902,20 +920,73 @@ namespace rpml
 
 			return loss;
 		}
-		Mat forward( const Mat& x )
+		std::shared_ptr<LocalStorage> acquireLocalStorage()
 		{
-			std::vector<MatContext> MatContexts( m_layers.size() );
-			Mat inputMat = x;
-			Mat outputMat;
+			std::shared_ptr<LocalStorage> localStorage;
+			{
+				std::lock_guard<std::mutex> lc( m_localMutex );
+				auto tid = std::this_thread::get_id();
+				if( m_localStorages.count( tid ) == 0 )
+				{
+					m_localStorages[tid] = std::shared_ptr<LocalStorage>( new LocalStorage() );
+				}
+				localStorage = m_localStorages[tid];
+			}
+			return localStorage;
+		}
+
+		void forward( Mat *r, const Mat& x )
+		{
+			std::shared_ptr<LocalStorage> localStorage = acquireLocalStorage();
+
+			Mat& inputMat = *r;
+			Mat& outputMat = localStorage->context.var( "outputMat" );
+			inputMat = x;
+
 			for( int i = 0; i < m_layers.size(); i++ )
 			{
 				RPML_ASSERT( inputMat.col() == m_layers[i]->inputDimensions() );
-				m_layers[i]->forward( &outputMat, inputMat, &MatContexts[i] );
+				m_layers[i]->forward( &outputMat, inputMat, nullptr );
 				RPML_ASSERT( outputMat.col() == m_layers[i]->outputDimensions() );
 				inputMat.swap( outputMat );
 			}
-			return inputMat;
 		}
+		void forwardMT( Mat* r, const Mat& x )
+		{
+			int outputDim = m_layers[m_layers.size() - 1]->outputDimensions();
+			( *r ).setShape( x.row(), outputDim );
+
+			int nElement = x.row();
+			std::mutex lmutex;
+
+			pr::TaskGroup g;
+			g.addElements( nElement );
+			m_pool.enqueueFor( nElement, 2, [&]( int64_t beg, int64_t end )
+			{
+				std::shared_ptr<LocalStorage> localStorage = acquireLocalStorage();
+				localStorage->layerContexts.resize( m_layers.size() );
+
+				Mat& inputMat = localStorage->context.var( "inputMat" );
+				Mat& outputMat = localStorage->context.var( "outputMat" );
+
+				sliceH( &inputMat, x, beg, end );
+				
+				for( int i = 0; i < m_layers.size(); i++ )
+				{
+					RPML_ASSERT( inputMat.col() == m_layers[i]->inputDimensions() );
+					m_layers[i]->forward( &outputMat, inputMat, nullptr );
+					RPML_ASSERT( outputMat.col() == m_layers[i]->outputDimensions() );
+					inputMat.swap( outputMat );
+				}
+
+				concatH( r, inputMat, beg, end );
+
+				g.doneElements( end - beg ); 
+			} );
+			g.waitForAllElementsToFinish();
+
+		}
+
 		std::vector<std::unique_ptr<Layer>> m_layers;
 		std::unique_ptr<Rng> m_rng;
 		pr::ThreadPool m_pool;
