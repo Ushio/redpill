@@ -5,6 +5,7 @@
 #include <random>
 #include <mutex>
 #include <algorithm>
+#include <chrono>
 
 #include "prth.hpp"
 
@@ -67,6 +68,26 @@ namespace rpml
 	inline int next_multiple( int val, int divisor )
 	{
 		return div_round_up( val, divisor ) * divisor;
+	}
+
+	namespace details
+	{
+		class Stopwatch
+		{
+		public:
+			using clock = std::chrono::steady_clock;
+			Stopwatch() : _started( clock::now() ) {}
+
+			// seconds
+			double elapsed() const
+			{
+				auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>( clock::now() - _started ).count();
+				return (double)microseconds * 0.001 * 0.001;
+			}
+
+		private:
+			clock::time_point _started;
+		};
 	}
 
 	struct Mat
@@ -533,7 +554,7 @@ namespace rpml
 		virtual void setupPropagation() = 0;
 		virtual void forward( Mat* r, const Mat& value, MatContext* context /* optional */ ) = 0;
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) = 0;
-		virtual void optimize( int nElement ) = 0;
+		virtual void optimize( int nElement, pr::ThreadPool *pool ) = 0;
 
 		int inputDimensions() const { return m_inputDimensions; }
 		int outputDimensions() const { return m_outputDimensions; }
@@ -624,7 +645,7 @@ namespace rpml
 			transpose( &trW, m_W );
 			mul( r, gradient, trW );
 		}
-		virtual void optimize( int nElement ) 
+		virtual void optimize( int nElement, pr::ThreadPool* pool ) 
 		{
 			m_oW->optimize( &m_W, m_dW, nElement );
 			m_ob->optimize( &m_b, m_db, nElement );
@@ -671,7 +692,7 @@ namespace rpml
 		}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void setupPropagation() {}
-		virtual void optimize( int nElement ) {}
+		virtual void optimize( int nElement, pr::ThreadPool* pool ) {}
 
 	private:
 		float m_slope;
@@ -712,7 +733,7 @@ namespace rpml
 		}
 		virtual void setupPropagation() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
-		virtual void optimize( int nElement ) {}
+		virtual void optimize( int nElement, pr::ThreadPool* pool ) {}
 	};
 	class TanhLayer : public Layer
 	{
@@ -744,7 +765,7 @@ namespace rpml
 		}
 		virtual void setupPropagation() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
-		virtual void optimize( int nElement ) {}
+		virtual void optimize( int nElement, pr::ThreadPool* pool ) {}
 	};
 
 	inline float mse( const Mat& x, const Mat& ref )
@@ -794,7 +815,7 @@ namespace rpml
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) { }
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void setupPropagation() {}
-		virtual void optimize( int nElement ) {}
+		virtual void optimize( int nElement, pr::ThreadPool* pool ) {}
 
 		Config m_config;
 	};
@@ -1036,12 +1057,27 @@ namespace rpml
 		}
 		
 		
-		virtual void optimize( int nElement ) 
+		virtual void optimize( int nElement, pr::ThreadPool* pool ) 
 		{
+#if 0
 			for( int i = 0; i < m_config.L ; i++ )
 			{
 				m_optimizers[i]->optimize( &m_features[i], m_dfeatures[i], nElement );
 			}
+#else
+			pr::TaskGroup g;
+			g.addElements( m_config.L );
+			for( int i = 0; i < m_config.L; i++ )
+			{
+				int index = i;
+				pool->enqueueTask( [index, nElement, this, &g]() 
+				{ 
+					m_optimizers[index]->optimize( &m_features[index], m_dfeatures[index], nElement ); 
+					g.doneElements( 1 );
+				} );
+			}
+			g.waitForAllElementsToFinish();
+#endif
 		}
 
 		Config m_config;
@@ -1156,6 +1192,8 @@ namespace rpml
 		{
 			RPML_ASSERT( x.row() == y.row() );
 
+			// details::Stopwatch sw;
+
 			int nElement = x.row();
 
 			for( int i = 0; i < m_layers.size(); i++ )
@@ -1213,10 +1251,15 @@ namespace rpml
 			} );
 			g.waitForAllElementsToFinish();
 
+			// printf( "fw bk %f s\n", sw.elapsed() );
+			// sw = details::Stopwatch();
+
 			for( int i = 0; i < m_layers.size(); i++ )
 			{
-				m_layers[i]->optimize( nElement );
+				m_layers[i]->optimize( nElement, &m_pool );
 			}
+
+			// printf( "optimize %f s\n", sw.elapsed() );
 
 			return loss;
 		}

@@ -2,14 +2,13 @@
 #include <iostream>
 #include <memory>
 
-//#define RPML_DISABLE_ASSERT
+// #define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
 using namespace rpml;
 
 //#include <json.hpp>
 //#include <sciplot/sciplot.hpp>
 //using namespace sciplot;
-
 
 inline float nnAnd( float x0, float x1 )
 {
@@ -201,12 +200,12 @@ int main()
 		static int iterations = 0;
 
 		float loss = 0;
-		int NData = 256 * 256;
+		int NData = 256 * 16;
 		static Mat inputs( NData, 2 );
 		static Mat refs( NData, 3 );
 
 		Stopwatch sw_train;
-		for( int j = 0; j < 10; ++j )
+		for( int j = 0; j < 100; ++j )
 		{
 			for( int i = 0; i < NData; ++i )
 			{
@@ -276,7 +275,7 @@ int main()
 		ImGui::Begin( "Panel" );
 		ImGui::Text( "fps = %f", GetFrameRate() );
 		ImGui::Text( "mse = %.10f", loss / NData );
-		ImGui::Text( "iterations = %d", iterations );
+		ImGui::Text( "iterations = %d, batch=%d", iterations, NData );
 		
 		ImGui::Text( "%f s train", sTrained );
 		ImGui::Text( "%f s estimate", sEstimate );
