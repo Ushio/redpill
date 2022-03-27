@@ -178,7 +178,7 @@ int main()
 
 	double e = GetElapsedTime();
 
-	static float learning = 0.01f;
+	static float learning = 0.02f;
 
 	while( pr::NextFrame() == false )
 	{

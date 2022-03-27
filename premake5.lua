@@ -72,6 +72,9 @@ project "bugcatcher"
     -- Src
     files { "bugcatcher.cpp" }
     files { "redpill.hpp" }
+    files { "libs/prlib/src/prth.cpp" }
+    files { "libs/prlib/src/prth.hpp" }
+
     includedirs { "." }
     includedirs { "libs/prlib/src" }
 

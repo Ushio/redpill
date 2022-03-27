@@ -29,6 +29,8 @@
 #include <immintrin.h>
 #endif
 
+#include <Windows.h>
+
 namespace rpml
 {
 	const float pi = 3.14159265358979323846f;
@@ -304,6 +306,35 @@ namespace rpml
 	inline float maxss( float a, float b )
 	{
 		return ( b < a ) ? a : b;
+	}
+
+	// atomic
+	inline int32_t as_int32( float f )
+	{
+		return *reinterpret_cast<int32_t*>( &f );
+	}
+	inline float as_float( int32_t u )
+	{
+		return *reinterpret_cast<float*>( &u );
+	}
+
+	inline void atomAdd( float* p, float v )
+	{
+		// https://docs.microsoft.com/en-us/windows/win32/winprog/windows-data-types
+		// LONG: A 32 - bit signed integer.The range is - 2147483648 through 2147483647 decimal.
+
+		float curVal = ( *p );
+		LONG orig;
+		for( ;; )
+		{
+			float newVal = curVal + v;
+			orig = InterlockedCompareExchange( (LONG*)p, as_int32( newVal ), as_int32( curVal ) );
+			if( orig == as_int32( curVal ) )
+			{
+				break;
+			}
+			curVal = as_float( orig );
+		};
 	}
 
 	class Optimizer
@@ -943,8 +974,6 @@ namespace rpml
 			std::vector<uint32_t> hash_inputs( dim );
 			std::vector<float> dfeatureVector( dim );
 
-			std::lock_guard<std::mutex> lc( m_dmutex ); // optimize later
-
 			for( int row = 0; row < value.row(); row++ )
 			{
 				float resolution = m_config.Nmin;
@@ -987,7 +1016,8 @@ namespace rpml
 					}
 					RPML_ASSERT( fabs( sw - 1.0f ) < 0.001f );
 #endif
-					// linear interpolate
+					// accumulate derivative
+					Mat& dfeature = m_dfeatures[l];
 					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
 					{
 						float w = weights[bits];
@@ -995,7 +1025,7 @@ namespace rpml
 						for( int fdim = 0; fdim < m_config.F; fdim++ )
 						{
 							float g = gradient( m_config.F * l + fdim, row );
-							m_dfeatures[l]( fdim, index ) += g * w;
+							atomAdd( &dfeature( fdim, index ), g * w );
 						}
 					}
 
@@ -1019,8 +1049,6 @@ namespace rpml
 		std::vector<Mat> m_features;
 		std::vector<Mat> m_dfeatures;
 		std::vector<std::unique_ptr<Optimizer>> m_optimizers;
-
-		std::mutex m_dmutex;
 	};
 
 	class MLPConfig

@@ -10,6 +10,22 @@ TEST_CASE( "misc", "[misc]" )
 	REQUIRE( next_multiple( 10, 10 ) == 10 );
 	REQUIRE( next_multiple( 11, 10 ) == 20 );
 	REQUIRE( next_multiple( 65, 8 ) == 72 );
+
+	pr::ThreadPool pool( std::thread::hardware_concurrency() );
+
+	int N = 8388608;
+	float v = 0.0f;
+
+	pr::TaskGroup g;
+	g.addElements( N );
+	pool.enqueueFor( N, 1000, [&v, &g]( int64_t beg, int64_t end )
+	{ 
+		atomAdd( &v, end - beg );
+		g.doneElements( end - beg );
+	} );
+	g.waitForAllElementsToFinish();
+
+	REQUIRE( v == N );
 }
 TEST_CASE("Mat transpose", "[transpose]") {
     Mat a = fromColMajor(2, 3, { 1, 4, 2, 5, 3, 6 });
