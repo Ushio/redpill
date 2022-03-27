@@ -442,15 +442,52 @@ namespace rpml
 			m_beta1t *= m_beta1;
 			m_beta2t *= m_beta2;
 
-			FOR_EACH_ELEMENT( (*parameter), ix, iy )
+#if ENABLE_SIMD
+			__m256 alpha = _mm256_set1_ps( m_alpha );
+			__m256 beta1 = _mm256_set1_ps( m_beta1 );
+			__m256 beta2 = _mm256_set1_ps( m_beta2 );
+			__m256 beta1t = _mm256_set1_ps( m_beta1t );
+			__m256 beta2t = _mm256_set1_ps( m_beta2t );
+			__m256 e = _mm256_set1_ps( m_e );
+			__m256 one = _mm256_set1_ps( 1.0f );
+
+			int ix = 0;
+			while( ix < ( *parameter ).col() )
+			{
+				int iy = 0;
+				while( iy < ( *parameter ).row() )
+				{
+					__m256 g = _mm256_loadu_ps( &gradient( ix, iy ) );
+					__m256 gg = _mm256_mul_ps( g, g );
+					__m256 m = _mm256_loadu_ps( &m_m( ix, iy ) );
+					__m256 v = _mm256_loadu_ps( &m_v( ix, iy ) );
+					m = _mm256_add_ps( _mm256_mul_ps( beta1, m ), _mm256_mul_ps( _mm256_sub_ps( one, beta1 ), g ) );
+					v = _mm256_add_ps( _mm256_mul_ps( beta2, v ), _mm256_mul_ps( _mm256_sub_ps( one, beta2 ), gg ) );
+					_mm256_storeu_ps( &m_m( ix, iy ), m );
+					_mm256_storeu_ps( &m_v( ix, iy ), v );
+
+					__m256 m_hat = _mm256_div_ps( m, _mm256_sub_ps( one, beta1t ) );
+					__m256 v_hat = _mm256_div_ps( v, _mm256_sub_ps( one, beta2t ) );
+
+					__m256 p = _mm256_loadu_ps( &( ( *parameter )( ix, iy ) ) );
+					p = _mm256_sub_ps( p, _mm256_div_ps( _mm256_mul_ps( alpha, m_hat ), _mm256_add_ps( _mm256_sqrt_ps( v_hat ), e ) ) );
+
+					_mm256_storeu_ps( &( ( *parameter )( ix, iy ) ), p );
+					iy += 8;
+				}
+				ix++;
+			}
+#else
+			FOR_EACH_ELEMENT( ( *parameter ), ix, iy )
 			{
 				float g = gradient( ix, iy );
 				float m = m_m( ix, iy ) = m_beta1 * m_m( ix, iy ) + ( 1.0f - m_beta1 ) * g;
 				float v = m_v( ix, iy ) = m_beta2 * m_v( ix, iy ) + ( 1.0f - m_beta2 ) * g * g;
-				float adam_m_hat = m / ( 1.0f - m_beta1t );
-				float adam_v_hat = v / ( 1.0f - m_beta2t );
-				( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - m_alpha * adam_m_hat / ( std::sqrt( adam_v_hat ) + m_e );
+				float m_hat = m / ( 1.0f - m_beta1t );
+				float v_hat = v / ( 1.0f - m_beta2t );
+				( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - m_alpha * m_hat / ( std::sqrt( v_hat ) + m_e );
 			}
+#endif
 		}
 
 	private:
