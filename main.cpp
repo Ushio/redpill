@@ -149,7 +149,7 @@ int main()
 	
 
 	Image2DRGBA8 image;
-	//image.load( "img/small_albert.jpg" );
+	// image.load( "img/small_albert.jpg" );
 	image.load( "img/coyote.jpg" );
 	Image2DRGBA8 estimatedImage;
 	estimatedImage.allocate( image.width(), image.height() );
@@ -178,7 +178,7 @@ int main()
 
 	double e = GetElapsedTime();
 
-	static float learning = 0.005f;
+	static float learning = 0.01f;
 
 	while( pr::NextFrame() == false )
 	{
@@ -198,8 +198,10 @@ int main()
 
 		// Batch
 		static StandardRng rng;
+		static int iterations = 0;
+
 		float loss = 0;
-		int NData = 256 * 16;
+		int NData = 256 * 256;
 		static Mat inputs( NData, 2 );
 		static Mat refs( NData, 3 );
 
@@ -213,14 +215,16 @@ int main()
 				float v = rng.draw(); 
 				int ui = (int)glm::mix( 0.0f, (float)image.width(), u );
 				int vi = (int)glm::mix( 0.0f, (float)image.height(), v );
-				glm::uvec3 y = image( ui, vi );
 				inputs( 0, i ) = u;
 				inputs( 1, i ) = v;
+
+				glm::uvec3 y = image( ui, vi );
 				refs( 0, i ) = y.x / 255.0f;
 				refs( 1, i ) = y.y / 255.0f;
 				refs( 2, i ) = y.z / 255.0f;
 			}
 			loss = mlp.train( inputs, refs );
+			iterations++;
 		}
 		float sTrained = sw_train.elapsed();
 
@@ -259,6 +263,10 @@ int main()
 		}
 		texture->upload( estimatedImage );
 
+		//char name[256];
+		//sprintf( name, "estimated_%03d.png", iterations );
+		//estimatedImage.saveAsPng( name );
+
 		PopGraphicState();
 		EndCamera();
 
@@ -268,6 +276,8 @@ int main()
 		ImGui::Begin( "Panel" );
 		ImGui::Text( "fps = %f", GetFrameRate() );
 		ImGui::Text( "mse = %.10f", loss / NData );
+		ImGui::Text( "iterations = %d", iterations );
+		
 		ImGui::Text( "%f s train", sTrained );
 		ImGui::Text( "%f s estimate", sEstimate );
 		

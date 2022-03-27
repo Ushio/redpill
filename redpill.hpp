@@ -774,10 +774,10 @@ namespace rpml
 		struct Config
 		{
 			int L = 16;
-			int T = std::pow( 2, 16 );
+			int T = std::pow( 2, 15 );
 			int F = 2;
 			int Nmin = 16;
-			int Nmax = 10000;
+			int Nmax = 7500;
 
 			float b() const
 			{
@@ -791,7 +791,7 @@ namespace rpml
 		uint32_t hash_nd( const uint32_t* xis, int d )
 		{
 			RPML_ASSERT( d <= 7 );
-			const uint32_t primes[7] = { 9973, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+			const uint32_t primes[7] = { 438976903, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
 			uint32_t h = 0;
 			for( uint32_t i = 0; i < d; ++i )
 			{
@@ -799,7 +799,7 @@ namespace rpml
 			}
 			return h;
 		}
-		MultiResolutionHashEncoder( int i, int o, const Config& config ) : Layer( i, o ), m_config( config ) 
+		MultiResolutionHashEncoder( int i, int o, const Config& config, OptimizerType optimizerType, float learningRate ) : Layer( i, o ), m_config( config ) 
 		{
 			m_features.resize( m_config.L );
 			m_dfeatures.resize( m_config.L );
@@ -809,7 +809,7 @@ namespace rpml
 				m_features[i].setShape( m_config.T, m_config.F );
 				m_dfeatures[i].setShape( m_config.T, m_config.F );
 				m_dfeatures[i].fill( 0.0f );
-				m_optimizers[i] = std::unique_ptr<Optimizer>( newOptimizer( OptimizerType::Adam, 0.005f ) );
+				m_optimizers[i] = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
 				m_optimizers[i]->initialize( m_config.T, m_config.F );
 			}
 		}
@@ -819,7 +819,7 @@ namespace rpml
 			{
 				FOR_EACH_ELEMENT( m_features[i], ix, iy )
 				{
-					m_features[i]( ix, iy ) = -1.0f + 2.0f * rng->draw();
+					m_features[i]( ix, iy ) = -1e-4f + 2.0f * 1e-4f * rng->draw();
 				}
 			}
 		}
@@ -873,15 +873,17 @@ namespace rpml
 							uint32_t xi = xf;
 							float u = xf - xi;
 
+							RPML_ASSERT( 0.0f <= u && u <= 1.0f );
+
 							if( bits & ( 1 << d ) )
 							{
 								w *= u;
-								hash_inputs[d] = xi;
+								hash_inputs[d] = xi + 1;
 							}
 							else
 							{
 								w *= 1.0f - u;
-								hash_inputs[d] = xi + 1;
+								hash_inputs[d] = xi;
 							}
 						}
 						weights[bits] = w;
@@ -965,12 +967,12 @@ namespace rpml
 							if( bits & ( 1 << d ) )
 							{
 								w *= u;
-								hash_inputs[d] = xi;
+								hash_inputs[d] = xi + 1;
 							}
 							else
 							{
 								w *= 1.0f - u;
-								hash_inputs[d] = xi + 1;
+								hash_inputs[d] = xi;
 							}
 						}
 						weights[bits] = w;
@@ -1081,7 +1083,7 @@ namespace rpml
 					else if( config.m_encoderType == EncoderType::MultiResolutionHash )
 					{
 						int encoderOutput = MultiResolutionHashEncoder::output( input, MultiResolutionHashEncoder::Config() );
-						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new MultiResolutionHashEncoder( input, encoderOutput, MultiResolutionHashEncoder::Config() ) );
+						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new MultiResolutionHashEncoder( input, encoderOutput, MultiResolutionHashEncoder::Config(), config.m_optimType, config.m_learningRate ) );
 						encoder->initialize( config.m_initType, m_rng.get() );
 						m_layers.emplace_back( std::move( encoder ) );
 
