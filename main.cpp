@@ -2,7 +2,7 @@
 #include <iostream>
 #include <memory>
 
-#define RPML_DISABLE_ASSERT
+//#define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
 using namespace rpml;
 
@@ -213,9 +213,6 @@ int main()
 
 	double e = GetElapsedTime();
 
-	static float learning = 0.02f;
-
-
 	while( pr::NextFrame() == false )
 	{
 		if( IsImGuiUsingMouse() == false )
@@ -323,15 +320,22 @@ int main() {
 
     SetDataDir(ExecutableDir());
 
-	MLP mlp( MLPConfig()
-		.shape( { 1, 64, 64, 1 } )
-        .learningRate( 0.01f )
-        .initType( InitializationType::He )
-		.optimType( OptimizerType::Adam )
-		.activationType( ActivationType::ReLU )
-        .encoderType( EncoderType::Frequency )
-    );
+	//MLP mlp( MLPConfig()
+	//	.shape( { 1, 64, 64, 1 } )
+ //       .learningRate( 0.01f )
+ //       .initType( InitializationType::He )
+	//	.optimType( OptimizerType::Adam )
+	//	.activationType( ActivationType::ReLU )
+ //       .encoderType( EncoderType::Frequency )
+ //   );
 
+	MLP mlp( MLPConfig()
+				.shape( { 1, 64, 64, 1 } )
+				.learningRate( 0.01f )
+				.initType( InitializationType::He )
+				.optimType( OptimizerType::Adam )
+				.activationType( ActivationType::ReLU )
+				.encoderType( EncoderType::MultiResolutionHash ) );
 
 	//for( ;; )
 	//{
@@ -369,8 +373,6 @@ int main() {
 	camera.zUp = false;
 
 	double e = GetElapsedTime();
-
-    static float learning = 0.005f;
 
 	while( pr::NextFrame() == false )
 	{

@@ -904,7 +904,7 @@ namespace rpml
 			std::vector<float> weights( 1 << dim );
 
 			std::vector<uint32_t> hash_inputs( dim );
-			std::vector<float> featureVector( dim );
+			std::vector<float> featureVector( m_config.F );
 
 			for( int row = 0; row < value.row() ; row++ )
 			{
