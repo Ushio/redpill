@@ -266,8 +266,12 @@ int main()
 		Image2DRGBA8 estimatedImage;
 		estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
 
+		Stopwatch sw_upload;
+
 		float sEstimate = sw_estimate.elapsed();
 		texture->upload( estimatedImage );
+
+		float sUpload = sw_upload.elapsed();
 
 		//char name[256];
 		//sprintf( name, "estimated_%03d.png", iterations );
@@ -286,7 +290,8 @@ int main()
 		
 		ImGui::Text( "%f s train", sTrained );
 		ImGui::Text( "%f s estimate", sEstimate );
-
+		ImGui::Text( "%f s upload", sUpload );
+		
 		if( ImGui::Button( "save full" ) )
 		{
 			Image2DRGBA8 full;

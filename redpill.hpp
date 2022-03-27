@@ -1224,7 +1224,7 @@ namespace rpml
 				}
 			}
 		}
-		float train( const Mat& x, const Mat& y )
+		float train( const Mat& x, const Mat& y, int taskGranularity = 2 )
 		{
 			RPML_ASSERT( x.row() == y.row() );
 
@@ -1242,7 +1242,7 @@ namespace rpml
 
 			pr::TaskGroup g;
 			g.addElements( nElement );
-			m_pool.enqueueFor( nElement, 2, [&]( int64_t beg, int64_t end ) 
+			m_pool.enqueueFor( nElement, taskGranularity, [&]( int64_t beg, int64_t end ) 
 			{
 				std::shared_ptr<LocalStorage> localStorage = acquireLocalStorage();
 				localStorage->layerContexts.resize( m_layers.size() );
@@ -1330,7 +1330,7 @@ namespace rpml
 				inputMat.swap( outputMat );
 			}
 		}
-		void forwardMT( Mat* r, const Mat& x )
+		void forwardMT( Mat* r, const Mat& x, int taskGranularity = 8 /* hyper parameter */ )
 		{
 			int outputDim = m_layers[m_layers.size() - 1]->outputDimensions();
 			( *r ).setShape( x.row(), outputDim );
@@ -1340,7 +1340,7 @@ namespace rpml
 
 			pr::TaskGroup g;
 			g.addElements( nElement );
-			m_pool.enqueueFor( nElement, 2, [&]( int64_t beg, int64_t end )
+			m_pool.enqueueFor( nElement, taskGranularity, [&]( int64_t beg, int64_t end )
 			{
 				std::shared_ptr<LocalStorage> localStorage = acquireLocalStorage();
 				localStorage->layerContexts.resize( m_layers.size() );
