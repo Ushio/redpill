@@ -2,9 +2,10 @@
 #include <iostream>
 #include <memory>
 
-// #define RPML_DISABLE_ASSERT
+#define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
 using namespace rpml;
+
 
 //#include <json.hpp>
 //#include <sciplot/sciplot.hpp>
@@ -109,6 +110,40 @@ void print( const Mat& m )
     }
 }
 
+void estimate( pr::Image2DRGBA8 *image, MLP& mlp, int width, int height )
+{
+	static Mat inUVs;
+	static Mat outPixels;
+
+	image->allocate( width, height );
+	inUVs.setShape( width * height, 2 );
+
+	for( int yi = 0; yi < height; yi++ )
+	{
+		for( int xi = 0; xi < width; xi++ )
+		{
+			int i = yi * width + xi;
+			inUVs( 0, i ) = ( xi + 0.5f ) / (float)width;
+			inUVs( 1, i ) = ( yi + 0.5f ) / (float)height;
+		}
+	}
+
+	mlp.forwardMT( &outPixels, inUVs );
+
+	for( int yi = 0; yi < height; yi++ )
+	{
+		for( int xi = 0; xi < width; xi++ )
+		{
+			int i = yi * width + xi;
+			(*image)( xi, yi ) = glm::uvec4(
+				glm::clamp<int>( outPixels( 0, i ) * 255.0f, 0, 255 ),
+				glm::clamp<int>( outPixels( 1, i ) * 255.0f, 0, 255 ),
+				glm::clamp<int>( outPixels( 2, i ) * 255.0f, 0, 255 ),
+				255 );
+		}
+	}
+}
+
 #if 1
 int main()
 {
@@ -116,42 +151,43 @@ int main()
 
 	SetDataDir( ExecutableDir() );
 
-	const int dim = 3;
-	float coordinate[dim] = { 0.1f, 0.3f, 0.9f };
-	float weights[1 << dim] = {};
-	
-	for( uint32_t bits = 0; bits < ( 1 << dim ) ; bits++ )
-	{
-		float w = 1.0f;
-		for( int d = 0 ; d < dim ; ++d )
-		{
-			float c = coordinate[d];
-			if( bits & ( 1 << d ) )
-			{
-				w *= c;
-			}
-			else
-			{
-				w *= 1.0f - c;
-			}
-		}
-		weights[bits] = w;
-	}
+	//const int dim = 3;
+	//float coordinate[dim] = { 0.1f, 0.3f, 0.9f };
+	//float weights[1 << dim] = {};
+	//
+	//for( uint32_t bits = 0; bits < ( 1 << dim ) ; bits++ )
+	//{
+	//	float w = 1.0f;
+	//	for( int d = 0 ; d < dim ; ++d )
+	//	{
+	//		float c = coordinate[d];
+	//		if( bits & ( 1 << d ) )
+	//		{
+	//			w *= c;
+	//		}
+	//		else
+	//		{
+	//			w *= 1.0f - c;
+	//		}
+	//	}
+	//	weights[bits] = w;
+	//}
 
-	float s = 0.0f;
-	for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
-	{
-		s += weights[bits];
-	}
+	//float s = 0.0f;
+	//for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
+	//{
+	//	s += weights[bits];
+	//}
 
-	float vals[2][2]    = {};
+	//float vals[2][2]    = {};
 	
 
 	Image2DRGBA8 image;
-	// image.load( "img/small_albert.jpg" );
-	image.load( "img/coyote.jpg" );
-	Image2DRGBA8 estimatedImage;
-	estimatedImage.allocate( image.width(), image.height() );
+	//image.load( "img/albert.jpg" );
+	image.load( "img/small_albert.jpg" );
+	//image.load( "img/coyote.jpg" );
+
+	float previewScale = 1.0f;
 
 	ITexture *texture = CreateTexture();
 
@@ -178,6 +214,7 @@ int main()
 	double e = GetElapsedTime();
 
 	static float learning = 0.02f;
+
 
 	while( pr::NextFrame() == false )
 	{
@@ -227,39 +264,12 @@ int main()
 		}
 		float sTrained = sw_train.elapsed();
 
-
-		static Mat inUVs( estimatedImage.width() * estimatedImage.height(), 2 );
-		static Mat outPixels;
-
 		Stopwatch sw_estimate;
-
-		for( int yi = 0; yi < estimatedImage.height(); yi++ )
-		{
-			for( int xi = 0; xi < estimatedImage.width(); xi++ )
-			{
-				int i = yi * estimatedImage.width() + xi;
-				inUVs( 0, i ) = ( xi + 0.5f ) / image.width();
-				inUVs( 1, i ) = ( yi + 0.5f ) / image.height();
-			}
-		}
-
-		mlp.forwardMT( &outPixels, inUVs );
+		
+		Image2DRGBA8 estimatedImage;
+		estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
 
 		float sEstimate = sw_estimate.elapsed();
-
-		for( int yi = 0; yi < estimatedImage.height(); yi++ )
-		{
-			for( int xi = 0; xi < estimatedImage.width(); xi++ )
-			{
-				int i = yi * estimatedImage.width() + xi;
-				estimatedImage( xi, yi ) = glm::uvec4(
-					glm::clamp<int>( outPixels( 0, i ) * 255.0f, 0, 255 ),
-					glm::clamp<int>( outPixels( 1, i ) * 255.0f, 0, 255 ),
-					glm::clamp<int>( outPixels( 2, i ) * 255.0f, 0, 255 ),
-					255
-				);
-			}
-		}
 		texture->upload( estimatedImage );
 
 		//char name[256];
@@ -279,11 +289,16 @@ int main()
 		
 		ImGui::Text( "%f s train", sTrained );
 		ImGui::Text( "%f s estimate", sEstimate );
+
+		if( ImGui::Button( "save full" ) )
+		{
+			Image2DRGBA8 full;
+			estimate( &full, mlp, image.width(), image.height() );
+			full.saveAsPng( "full_estimate.png" );
+		}
 		
-		static float scale = 1.0f;
-		ImGui::SliderFloat( "scale", &scale, 0, 1 );
-		float w = texture->width() * scale;
-		float h = texture->height() * scale;
+		float w = texture->width();
+		float h = texture->height();
 		ImGui::Image( texture, ImVec2( w, h ) );
 
 		ImGui::End();
