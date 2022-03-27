@@ -320,22 +320,21 @@ int main() {
 
     SetDataDir(ExecutableDir());
 
-	//MLP mlp( MLPConfig()
-	//	.shape( { 1, 64, 64, 1 } )
- //       .learningRate( 0.01f )
- //       .initType( InitializationType::He )
-	//	.optimType( OptimizerType::Adam )
-	//	.activationType( ActivationType::ReLU )
- //       .encoderType( EncoderType::Frequency )
- //   );
-
 	MLP mlp( MLPConfig()
-				.shape( { 1, 64, 64, 1 } )
-				.learningRate( 0.01f )
-				.initType( InitializationType::He )
-				.optimType( OptimizerType::Adam )
-				.activationType( ActivationType::ReLU )
-				.encoderType( EncoderType::MultiResolutionHash ) );
+				 .shape( { 1, 64, 64, 1 } )
+				 .learningRate( 0.01f )
+				 .initType( InitializationType::He )
+				 .optimType( OptimizerType::Adam )
+				 .activationType( ActivationType::ReLU )
+				 .encoderType( EncoderType::Frequency ) );
+
+	//MLP mlp( MLPConfig()
+	//			.shape( { 1, 64, 64, 1 } )
+	//			.learningRate( 0.01f )
+	//			.initType( InitializationType::He )
+	//			.optimType( OptimizerType::Adam )
+	//			.activationType( ActivationType::ReLU )
+	//			.encoderType( EncoderType::MultiResolutionHash ) );
 
 	//for( ;; )
 	//{
@@ -347,6 +346,7 @@ int main() {
 
 	//	Stopwatch sw;
 
+	//	Mat m;
 	//	for( int i = 0; i < 1000; ++i )
 	//	{
 	//		FOR_EACH_ELEMENT( ma, ix, iy )
@@ -354,7 +354,8 @@ int main() {
 	//			ma( ix, iy ) = glm::mix( -1.2f, 1.2f, rng.draw() );
 	//			mb( ix, iy ) = glm::mix( -1.2f, 1.2f, rng.draw() );
 	//		}
-	//		Mat m = ma * mb;
+	//		
+	//		mul( &m, ma, mb );
 
 	//		p += m( 64, 64 );
 	//	}

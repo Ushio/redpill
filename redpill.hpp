@@ -218,18 +218,54 @@ namespace rpml
 			int iy = 0;
 			while( iy < ( *r ).row() )
 			{
-				__m256 v = _mm256_setzero_ps();
-
-				const int n = ma.col();
-				for( int i = 0; i < n; i++ )
+// Loop tiling - https://stackoverflow.com/questions/59009628/tiled-matrix-multiplication-using-avx
+#if 1
+				if( iy + 32 <= ( *r ).row() )
 				{
-					__m256 lhs = _mm256_loadu_ps( &ma( i, iy ) );
-					__m256 rhs = _mm256_set1_ps( mb( ix, i ) );
-					v = _mm256_fmadd_ps( lhs, rhs, v );
-				}
+					__m256 v0 = _mm256_setzero_ps();
+					__m256 v1 = _mm256_setzero_ps();
+					__m256 v2 = _mm256_setzero_ps();
+					__m256 v3 = _mm256_setzero_ps();
 
-				_mm256_storeu_ps( &( ( *r )( ix, iy ) ), v );
-				iy += 8;
+					const int n = ma.col();
+					for( int i = 0; i < n; i++ )
+					{
+						__m256 lhs0 = _mm256_loadu_ps( &ma( i, iy ) );
+						__m256 lhs1 = _mm256_loadu_ps( &ma( i, iy + 8 ) );
+						__m256 lhs2 = _mm256_loadu_ps( &ma( i, iy + 16 ) );
+						__m256 lhs3 = _mm256_loadu_ps( &ma( i, iy + 24 ) );
+
+						__m256 rhs = _mm256_set1_ps( mb( ix, i ) );
+
+						v0 = _mm256_fmadd_ps( lhs0, rhs, v0 );
+						v1 = _mm256_fmadd_ps( lhs1, rhs, v1 );
+						v2 = _mm256_fmadd_ps( lhs2, rhs, v2 );
+						v3 = _mm256_fmadd_ps( lhs3, rhs, v3 );
+					}
+
+					_mm256_storeu_ps( &( ( *r )( ix, iy ) ), v0 );
+					_mm256_storeu_ps( &( ( *r )( ix, iy + 8 ) ), v1 );
+					_mm256_storeu_ps( &( ( *r )( ix, iy + 16 ) ), v2 );
+					_mm256_storeu_ps( &( ( *r )( ix, iy + 24 ) ), v3 );
+
+					iy += 32;
+				}
+				else
+#endif
+				{ // naiive simd
+					__m256 v = _mm256_setzero_ps();
+
+					const int n = ma.col();
+					for( int i = 0; i < n; i++ )
+					{
+						__m256 lhs = _mm256_loadu_ps( &ma( i, iy ) );
+						__m256 rhs = _mm256_set1_ps( mb( ix, i ) );
+						v = _mm256_fmadd_ps( lhs, rhs, v );
+					}
+
+					_mm256_storeu_ps( &( ( *r )( ix, iy ) ), v );
+					iy += 8;
+				}
 			}
 			ix++;
 		}
