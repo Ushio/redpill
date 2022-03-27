@@ -33,6 +33,31 @@ namespace rpml
 {
 	const float pi = 3.14159265358979323846f;
 
+	enum class OptimizerType
+	{
+		SGD,
+		Adam,
+	};
+	enum class InitializationType
+	{
+		Xavier,
+		He
+	};
+	enum class ActivationType
+	{
+		ReLU,
+		LeakyReLU,
+		Tanh,
+		Sigmoid
+	};
+	enum class EncoderType
+	{
+		None,
+		Frequency,
+		MultiResolutionHash
+	};
+
+
 	inline int div_round_up( int val, int divisor )
 	{
 		return ( val + divisor - 1 ) / divisor;
@@ -351,6 +376,20 @@ namespace rpml
 		Mat m_v;
 	};
 
+	inline Optimizer* newOptimizer( OptimizerType optimizerType, float learningRate )
+	{
+		Optimizer* o = nullptr;
+		if( optimizerType == OptimizerType::SGD )
+		{
+			o = new OptimizerSGD( learningRate );
+		}
+		else if( optimizerType == OptimizerType::Adam )
+		{
+			o = new OptimizerAdam( learningRate );
+		}
+		return o;
+	}
+
 	// inline void xavier(Mat)
 	// PCG 
 	namespace pcg
@@ -439,28 +478,6 @@ namespace rpml
 		return a + ( b - a ) * rng->draw();
 	}
 
-	enum class OptimizerType
-	{
-		SGD,
-		Adam,
-	};
-	enum class InitializationType
-	{
-		Xavier,
-		He
-	};
-	enum class ActivationType 
-	{
-		ReLU,
-		LeakyReLU,
-		Tanh,
-		Sigmoid
-	};
-	enum class EncoderType
-	{
-		None,
-		Frequency,
-	};
 	class MatContext
 	{
 	public:
@@ -499,16 +516,8 @@ namespace rpml
 	public:
 		AffineLayer( int i, int o, OptimizerType optimizerType, float learningRate ) : Layer( i, o ), m_W( i, o ), m_b( 1, o )
 		{
-			if( optimizerType == OptimizerType::SGD )
-			{
-				m_oW = std::unique_ptr<Optimizer>( new OptimizerSGD( learningRate ) );
-				m_ob = std::unique_ptr<Optimizer>( new OptimizerSGD( learningRate ) );
-			}
-			else if( optimizerType == OptimizerType::Adam)
-			{
-				m_oW = std::unique_ptr<Optimizer>( new OptimizerAdam( learningRate ) );
-				m_ob = std::unique_ptr<Optimizer>( new OptimizerAdam( learningRate ) );
-			}
+			m_oW = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
+			m_ob = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
 			m_oW->initialize( m_W.row(), m_W.col() );
 			m_ob->initialize( m_b.row(), m_b.col() );
 
@@ -759,6 +768,259 @@ namespace rpml
 		Config m_config;
 	};
 
+	class MultiResolutionHashEncoder : public Layer
+	{
+	public:
+		struct Config
+		{
+			int L = 16;
+			int T = std::pow( 2, 16 );
+			int F = 2;
+			int Nmin = 16;
+			int Nmax = 10000;
+
+			float b() const
+			{
+				return std::exp( std::log( (float)Nmax / (float)Nmin ) / ( L - 1 ) );
+			}
+		};
+		static int output( int input, const Config& config )
+		{
+			return config.L * config.F + input;
+		}
+		uint32_t hash_nd( const uint32_t* xis, int d )
+		{
+			RPML_ASSERT( d <= 7 );
+			const uint32_t primes[7] = { 9973, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+			uint32_t h = 0;
+			for( uint32_t i = 0; i < d; ++i )
+			{
+				h ^= xis[i] * primes[i];
+			}
+			return h;
+		}
+		MultiResolutionHashEncoder( int i, int o, const Config& config ) : Layer( i, o ), m_config( config ) 
+		{
+			m_features.resize( m_config.L );
+			m_dfeatures.resize( m_config.L );
+			m_optimizers.resize( m_config.L );
+			for( int i = 0; i < m_config.L ; i++ )
+			{
+				m_features[i].setShape( m_config.T, m_config.F );
+				m_dfeatures[i].setShape( m_config.T, m_config.F );
+				m_dfeatures[i].fill( 0.0f );
+				m_optimizers[i] = std::unique_ptr<Optimizer>( newOptimizer( OptimizerType::Adam, 0.005f ) );
+				m_optimizers[i]->initialize( m_config.T, m_config.F );
+			}
+		}
+		virtual void initialize( InitializationType initType, Rng* rng ) 
+		{
+			for( int i = 0; i < m_features.size() ; i++ )
+			{
+				FOR_EACH_ELEMENT( m_features[i], ix, iy )
+				{
+					m_features[i]( ix, iy ) = -1.0f + 2.0f * rng->draw();
+				}
+			}
+		}
+
+		// assume input values are 0 to 1
+		virtual void forward( Mat* r, const Mat& value, MatContext* context )
+		{
+			RPML_ASSERT( value.col() == inputDimensions() );
+
+			( *r ).setShape( value.row(), outputDimensions() );
+
+			if( context )
+			{
+				context->var( "value" ) = value;
+			}
+
+			// copy original 
+			for( int row = 0; row < value.row(); row++ )
+			{
+				for( int col = 0; col < value.col(); col++ )
+				{
+					( *r )( m_config.F * m_config.L + col, row ) = value( col, row );
+				}
+			}
+
+			const int dim = inputDimensions();
+			const float b = m_config.b();
+
+			std::vector<uint32_t> hash_coordinate( 1 << dim );
+			std::vector<float> weights( 1 << dim );
+
+			std::vector<uint32_t> hash_inputs( dim );
+			std::vector<float> featureVector( dim );
+
+			for( int row = 0; row < value.row() ; row++ )
+			{
+				float resolution = m_config.Nmin;
+				for( int l = 0 ; l < m_config.L ; l++ )
+				{
+					float res = floor( resolution );
+
+					// get hash_inputs and its hash_coordinate
+					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
+					{
+						float w = 1.0f;
+						for( int d = 0; d < dim; ++d )
+						{
+							float x_in = value( d, row );
+
+							float xf = x_in * res;
+							uint32_t xi = xf;
+							float u = xf - xi;
+
+							if( bits & ( 1 << d ) )
+							{
+								w *= u;
+								hash_inputs[d] = xi;
+							}
+							else
+							{
+								w *= 1.0f - u;
+								hash_inputs[d] = xi + 1;
+							}
+						}
+						weights[bits] = w;
+						hash_coordinate[bits] = hash_nd( hash_inputs.data(), dim );
+					}
+
+#if !defined( RPML_DISABLE_ASSERT )
+					float sw = 0.0f;
+					for( auto w : weights )
+					{
+						sw += w;
+					}
+					RPML_ASSERT( fabs( sw - 1.0f ) < 0.001f );
+#endif
+					// linear interpolate
+					std::fill( featureVector.begin(), featureVector.end(), 0.0f );
+					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
+					{
+						float w = weights[bits];
+						uint32_t index = hash_coordinate[bits] % m_config.T;
+						for( int fdim = 0 ; fdim < m_config.F ; fdim++ )
+						{
+							featureVector[fdim] += w * m_features[l]( fdim, index );
+						}
+					}
+
+					// store feature vector
+					for( int fdim = 0; fdim < m_config.F; fdim++ )
+					{
+						( *r )( m_config.F * l + fdim, row ) = featureVector[fdim];
+					}
+					
+					// go to next resolution
+					resolution *= b;
+				}
+			}
+		}
+
+		// can remove?
+		virtual void setupPropagation()
+		{
+			for( int i = 0; i < m_dfeatures.size(); i++ )
+			{
+				m_dfeatures[i].fill( 0.0f );
+			}
+		}
+		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) 
+		{
+			const Mat& value = context->var( "value" );
+
+			const int dim = inputDimensions();
+			const float b = m_config.b();
+
+			std::vector<uint32_t> hash_coordinate( 1 << dim );
+			std::vector<float> weights( 1 << dim );
+
+			std::vector<uint32_t> hash_inputs( dim );
+			std::vector<float> dfeatureVector( dim );
+
+			std::lock_guard<std::mutex> lc( m_dmutex ); // optimize later
+
+			for( int row = 0; row < value.row(); row++ )
+			{
+				float resolution = m_config.Nmin;
+				for( int l = 0; l < m_config.L; l++ )
+				{
+					float res = floor( resolution );
+
+					// get hash_inputs and its hash_coordinate
+					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
+					{
+						float w = 1.0f;
+						for( int d = 0; d < dim; ++d )
+						{
+							float x_in = value( d, row );
+
+							float xf = x_in * res;
+							uint32_t xi = xf;
+							float u = xf - xi;
+
+							if( bits & ( 1 << d ) )
+							{
+								w *= u;
+								hash_inputs[d] = xi;
+							}
+							else
+							{
+								w *= 1.0f - u;
+								hash_inputs[d] = xi + 1;
+							}
+						}
+						weights[bits] = w;
+						hash_coordinate[bits] = hash_nd( hash_inputs.data(), dim );
+					}
+
+#if !defined( RPML_DISABLE_ASSERT )
+					float sw = 0.0f;
+					for( auto w : weights )
+					{
+						sw += w;
+					}
+					RPML_ASSERT( fabs( sw - 1.0f ) < 0.001f );
+#endif
+					// linear interpolate
+					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
+					{
+						float w = weights[bits];
+						uint32_t index = hash_coordinate[bits] % m_config.T;
+						for( int fdim = 0; fdim < m_config.F; fdim++ )
+						{
+							float g = gradient( m_config.F * l + fdim, row );
+							m_dfeatures[l]( fdim, index ) += g * w;
+						}
+					}
+
+					// go to next resolution
+					resolution *= b;
+				}
+			}
+		}
+		
+		
+		virtual void optimize( int nElement ) 
+		{
+			for( int i = 0; i < m_config.L ; i++ )
+			{
+				m_optimizers[i]->optimize( &m_features[i], m_dfeatures[i], nElement );
+			}
+		}
+
+		Config m_config;
+
+		std::vector<Mat> m_features;
+		std::vector<Mat> m_dfeatures;
+		std::vector<std::unique_ptr<Optimizer>> m_optimizers;
+
+		std::mutex m_dmutex;
+	};
+
 	class MLPConfig
 	{
 	public:
@@ -816,6 +1078,15 @@ namespace rpml
 
 						input = encoderOutput;
 					}
+					else if( config.m_encoderType == EncoderType::MultiResolutionHash )
+					{
+						int encoderOutput = MultiResolutionHashEncoder::output( input, MultiResolutionHashEncoder::Config() );
+						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new MultiResolutionHashEncoder( input, encoderOutput, MultiResolutionHashEncoder::Config() ) );
+						encoder->initialize( config.m_initType, m_rng.get() );
+						m_layers.emplace_back( std::move( encoder ) );
+
+						input = encoderOutput;
+					}
 				}
 
 				std::unique_ptr<Layer> layer( new AffineLayer( input, output, config.m_optimType, config.m_learningRate ) );
@@ -854,7 +1125,6 @@ namespace rpml
 		float train( const Mat& x, const Mat& y )
 		{
 			RPML_ASSERT( x.row() == y.row() );
-			RPML_ASSERT( x.col() == y.col() );
 
 			int nElement = x.row();
 

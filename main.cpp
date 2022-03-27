@@ -2,7 +2,7 @@
 #include <iostream>
 #include <memory>
 
-#define RPML_DISABLE_ASSERT
+//#define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
 using namespace rpml;
 
@@ -117,6 +117,37 @@ int main()
 
 	SetDataDir( ExecutableDir() );
 
+	const int dim = 3;
+	float coordinate[dim] = { 0.1f, 0.3f, 0.9f };
+	float weights[1 << dim] = {};
+	
+	for( uint32_t bits = 0; bits < ( 1 << dim ) ; bits++ )
+	{
+		float w = 1.0f;
+		for( int d = 0 ; d < dim ; ++d )
+		{
+			float c = coordinate[d];
+			if( bits & ( 1 << d ) )
+			{
+				w *= c;
+			}
+			else
+			{
+				w *= 1.0f - c;
+			}
+		}
+		weights[bits] = w;
+	}
+
+	float s = 0.0f;
+	for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
+	{
+		s += weights[bits];
+	}
+
+	float vals[2][2]    = {};
+	
+
 	Image2DRGBA8 image;
 	//image.load( "img/small_albert.jpg" );
 	image.load( "img/coyote.jpg" );
@@ -131,7 +162,7 @@ int main()
 				 .initType( InitializationType::He )
 				 .optimType( OptimizerType::Adam )
 				 .activationType( ActivationType::ReLU )
-				 .encoderType( EncoderType::Frequency ) );
+				 .encoderType( EncoderType::MultiResolutionHash ) );
 
 
 	Config config;
@@ -173,7 +204,7 @@ int main()
 		static Mat refs( NData, 3 );
 
 		Stopwatch sw_train;
-		for( int j = 0; j < 100; ++j )
+		for( int j = 0; j < 10; ++j )
 		{
 			for( int i = 0; i < NData; ++i )
 			{
