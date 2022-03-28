@@ -1,8 +1,9 @@
 ﻿#include "pr.hpp"
 #include <iostream>
 #include <memory>
+#include <fstream>
 
-//#define RPML_DISABLE_ASSERT
+#define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
 using namespace rpml;
 
@@ -241,6 +242,7 @@ int main()
 		Stopwatch sw_train;
 		for( int j = 0; j < 100; ++j )
 		{
+			Stopwatch sw_prepare;
 			for( int i = 0; i < NData; ++i )
 			{
 				// if it's freq then need to be carefull range of x?
@@ -256,7 +258,9 @@ int main()
 				refs( 1, i ) = y.y / 255.0f;
 				refs( 2, i ) = y.z / 255.0f;
 			}
+			// printf( "sw_prepare %f\n", sw_prepare.elapsed() );
 			loss = mlp.train( inputs, refs );
+
 			iterations++;
 		}
 		float sTrained = sw_train.elapsed();
@@ -276,6 +280,14 @@ int main()
 		//char name[256];
 		//sprintf( name, "estimated_%03d.png", iterations );
 		//estimatedImage.saveAsPng( name );
+
+		//if( iterations > 300 )
+		//{
+		//	auto tr = pr::ChromeTraceGetTrace();
+		//	std::ofstream ofs( GetDataPath( "tr.json" ).c_str() );
+		//	ofs << tr;
+		//	break;
+		//}
 
 		PopGraphicState();
 		EndCamera();

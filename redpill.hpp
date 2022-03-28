@@ -5,6 +5,7 @@
 #include <random>
 #include <mutex>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 
 #include "prth.hpp"
@@ -28,6 +29,11 @@
 
 #if ENABLE_SIMD
 #include <immintrin.h>
+#endif
+
+#define ENABLE_TRACE 0
+#if ENABLE_TRACE
+#include "prtr.hpp"
 #endif
 
 #include <Windows.h>
@@ -1145,11 +1151,18 @@ namespace rpml
 				int index = i;
 				pool->enqueueTask( [index, nElement, this, &g]() 
 				{ 
+#if ENABLE_TRACE
+					pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+					tr.label( "m_optimizers[index]" );
+#endif
 					m_optimizers[index]->optimize( &m_features[index], m_dfeatures[index], nElement ); 
 					g.doneElements( 1 );
 				} );
 			}
-			g.waitForAllElementsToFinish();
+			while( !g.isFinished() )
+			{
+				pool->processTask();
+			}
 #endif
 		}
 
@@ -1199,7 +1212,7 @@ namespace rpml
 	public:
 		MLP( const MLPConfig& config ) : m_pool( std::thread::hardware_concurrency() )
 		{
-			m_rng = std::unique_ptr<Rng>( new StandardRng() );
+			std::unique_ptr<Rng> rng = std::unique_ptr<Rng>( new StandardRng() );
 
 			for( int i = 0; i < config.m_shape.size() - 1; i++ )
 			{
@@ -1212,7 +1225,7 @@ namespace rpml
 					{
 						int encoderOutput = FrequencyEncoder::output( input, config.m_frequencyEncoderConfig );
 						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new FrequencyEncoder( input, encoderOutput, config.m_frequencyEncoderConfig ) );
-						encoder->initialize( config.m_initType, m_rng.get() );
+						encoder->initialize( config.m_initType, rng.get() );
 						m_layers.emplace_back( std::move( encoder ) );
 
 						input = encoderOutput;
@@ -1221,7 +1234,7 @@ namespace rpml
 					{
 						int encoderOutput = MultiResolutionHashEncoder::output( input, MultiResolutionHashEncoder::Config() );
 						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new MultiResolutionHashEncoder( input, encoderOutput, MultiResolutionHashEncoder::Config(), config.m_optimType, config.m_learningRate ) );
-						encoder->initialize( config.m_initType, m_rng.get() );
+						encoder->initialize( config.m_initType, rng.get() );
 						m_layers.emplace_back( std::move( encoder ) );
 
 						input = encoderOutput;
@@ -1229,7 +1242,7 @@ namespace rpml
 				}
 
 				std::unique_ptr<Layer> layer( new AffineLayer( input, output, config.m_optimType, config.m_learningRate ) );
-				layer->initialize( config.m_initType, m_rng.get() );
+				layer->initialize( config.m_initType, rng.get() );
 				m_layers.emplace_back( std::move( layer ) );
 
 				bool isLast = i + 1 == config.m_shape.size() - 1;
@@ -1256,7 +1269,7 @@ namespace rpml
 						RPML_ASSERT( 0 );
 					}
 
-					activation->initialize( config.m_initType, m_rng.get() );
+					activation->initialize( config.m_initType, rng.get() );
 					m_layers.emplace_back( std::move( activation ) );
 				}
 			}
@@ -1264,8 +1277,10 @@ namespace rpml
 		float train( const Mat& x, const Mat& y, int taskGranularity = 2 )
 		{
 			RPML_ASSERT( x.row() == y.row() );
-
-			// details::Stopwatch sw;
+#if ENABLE_TRACE
+			pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+			tr.label( "train" );
+#endif
 
 			int nElement = x.row();
 
@@ -1277,10 +1292,18 @@ namespace rpml
 			float loss = 0.0f;
 			std::mutex lmutex;
 
+			std::vector<std::atomic<int>> layerTasks( m_layers.size() );
+			std::fill( layerTasks.begin(), layerTasks.end(), 0 );
+
 			pr::TaskGroup g;
 			g.addElements( nElement );
 			m_pool.enqueueFor( nElement, taskGranularity, [&]( int64_t beg, int64_t end ) 
 			{
+#if ENABLE_TRACE
+				pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+				tr.label( "train task" );
+#endif
+
 				std::shared_ptr<LocalStorage> localStorage = acquireLocalStorage();
 				localStorage->layerContexts.resize( m_layers.size() );
 
@@ -1314,6 +1337,12 @@ namespace rpml
 					RPML_ASSERT( inputMat.col() == m_layers[i]->outputDimensions() );
 					m_layers[i]->backward( &outputMat, inputMat, &localStorage->layerContexts[i] );
 
+					int nTasks = end - beg;
+					if( layerTasks[i].fetch_add( nTasks ) + nTasks == nElement )
+					{
+						m_layers[i]->optimize( nElement, &m_pool );
+					}
+
 					if( i != 0 )
 					{
 						RPML_ASSERT( outputMat.col() == m_layers[i]->inputDimensions() );
@@ -1322,17 +1351,10 @@ namespace rpml
 				}
 				g.doneElements( end - beg );
 			} );
-			g.waitForAllElementsToFinish();
-
-			// printf( "fw bk %f s\n", sw.elapsed() );
-			// sw = details::Stopwatch();
-
-			for( int i = 0; i < m_layers.size(); i++ )
+			while( !g.isFinished() )
 			{
-				m_layers[i]->optimize( nElement, &m_pool );
+				m_pool.processTask();
 			}
-
-			// printf( "optimize %f s\n", sw.elapsed() );
 
 			return loss;
 		}
@@ -1369,6 +1391,11 @@ namespace rpml
 		}
 		void forwardMT( Mat* r, const Mat& x, int taskGranularity = 8 /* hyper parameter */ )
 		{
+#if ENABLE_TRACE
+			pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+			tr.label( "forwardMT" );
+#endif
+
 			int outputDim = m_layers[m_layers.size() - 1]->outputDimensions();
 			( *r ).setShape( x.row(), outputDim );
 
@@ -1399,12 +1426,13 @@ namespace rpml
 
 				g.doneElements( end - beg ); 
 			} );
-			g.waitForAllElementsToFinish();
-
+			while( !g.isFinished() )
+			{
+				m_pool.processTask();
+			}
 		}
 
 		std::vector<std::unique_ptr<Layer>> m_layers;
-		std::unique_ptr<Rng> m_rng;
 		pr::ThreadPool m_pool;
 		std::map<std::thread::id, std::shared_ptr<LocalStorage>> m_localStorages;
 		std::mutex m_localMutex;
