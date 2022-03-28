@@ -229,9 +229,6 @@ TEST_CASE( "AffineLayer backward", "[affine backward]" )
 	float mse = evalMSE();
 	
     // back propagation
-	layer0.setupPropagation();
-	sigmoidLayer.setupPropagation();
-	layer1.setupPropagation();
 
 	Mat input = o;
 	sub( &input, ref ); // mse backward

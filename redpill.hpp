@@ -138,10 +138,18 @@ namespace rpml
 		}
 		void fill( float x )
 		{
+#if ENABLE_SIMD
+			__m256 v = _mm256_set1_ps( x );
+			for( int i = 0; i < m_data.size(); i += 8 )
+			{
+				_mm256_storeu_ps( &m_data[i], v );
+			}
+#else
 			for( int i = 0; i < m_data.size(); i++ )
 			{
 				m_data[i] = x ;
 			}
+#endif
 		}
 
 		float& operator()( int x, int y )
@@ -630,7 +638,6 @@ namespace rpml
 		Layer( int inputDimensions, int outputDimensions ) : m_inputDimensions( inputDimensions ), m_outputDimensions( outputDimensions ) {}
 		virtual ~Layer() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) = 0;
-		virtual void setupPropagation() = 0;
 		virtual void forward( Mat* r, const Mat& value, MatContext* context /* optional */ ) = 0;
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) = 0;
 		virtual void optimize( int nElement, pr::ThreadPool *pool ) = 0;
@@ -645,14 +652,19 @@ namespace rpml
 	class AffineLayer : public Layer
 	{
 	public:
-		AffineLayer( int i, int o, OptimizerType optimizerType, float learningRate ) : Layer( i, o ), m_W( i, o ), m_b( 1, o )
+		AffineLayer( int i, int o, OptimizerType optimizerType, float learningRate ) 
+			: Layer( i, o ) 
+			, m_W( i, o ) 
+			, m_b( 1, o ) 
+			, m_dW( i, o )
+			, m_db( 1, o )
 		{
 			m_oW = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
 			m_ob = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
 			m_oW->initialize( m_W.row(), m_W.col() );
 			m_ob->initialize( m_b.row(), m_b.col() );
-
-			setupPropagation();
+			m_dW.fill( 0.0f );
+			m_db.fill( 0.0f );
 		}
 		virtual void initialize( InitializationType initType , Rng* rng )
 		{
@@ -686,13 +698,6 @@ namespace rpml
 			{
 				RPML_ASSERT( 0 );
 			}
-		}
-		virtual void setupPropagation()
-		{
-			m_dW.setShape( m_W.row(), m_W.col() );
-			m_db.setShape( m_b.row(), m_b.col() );
-			m_dW.fill( 0.0f );
-			m_db.fill( 0.0f );
 		}
 		virtual void forward( Mat* r, const Mat& value, MatContext* context /* optional */ )
 		{
@@ -728,6 +733,10 @@ namespace rpml
 		{
 			m_oW->optimize( &m_W, m_dW, nElement );
 			m_ob->optimize( &m_b, m_db, nElement );
+
+			// clean up
+			m_dW.fill( 0.0f ); 
+			m_db.fill( 0.0f );
 		}
 		Mat m_W;  // ( input, output )
 		Mat m_b;  // ( 1, output )
@@ -770,7 +779,6 @@ namespace rpml
 			}
 		}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
-		virtual void setupPropagation() {}
 		virtual void optimize( int nElement, pr::ThreadPool* pool ) {}
 
 	private:
@@ -810,7 +818,6 @@ namespace rpml
 				( *r )( ix, iy ) = d * gradient( ix, iy );
 			}
 		}
-		virtual void setupPropagation() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement, pr::ThreadPool* pool ) {}
 	};
@@ -842,7 +849,6 @@ namespace rpml
 				( *r )( ix, iy ) = d * gradient( ix, iy );
 			}
 		}
-		virtual void setupPropagation() {}
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
 		virtual void optimize( int nElement, pr::ThreadPool* pool ) {}
 	};
@@ -893,7 +899,6 @@ namespace rpml
 		}
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) { }
 		virtual void initialize( InitializationType initType, Rng* rng ) {}
-		virtual void setupPropagation() {}
 		virtual void optimize( int nElement, pr::ThreadPool* pool ) {}
 
 		Config m_config;
@@ -1053,14 +1058,6 @@ namespace rpml
 			}
 		}
 
-		// can remove?
-		virtual void setupPropagation()
-		{
-			for( int i = 0; i < m_dfeatures.size(); i++ )
-			{
-				m_dfeatures[i].fill( 0.0f );
-			}
-		}
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context ) 
 		{
 			const Mat& value = context->var( "value" );
@@ -1142,6 +1139,7 @@ namespace rpml
 			for( int i = 0; i < m_config.L ; i++ )
 			{
 				m_optimizers[i]->optimize( &m_features[i], m_dfeatures[i], nElement );
+				m_dfeatures[i].fill( 0.0f );	
 			}
 #else
 			pr::TaskGroup g;
@@ -1156,6 +1154,8 @@ namespace rpml
 					tr.label( "m_optimizers[index]" );
 #endif
 					m_optimizers[index]->optimize( &m_features[index], m_dfeatures[index], nElement ); 
+					m_dfeatures[index].fill( 0.0f );
+
 					g.doneElements( 1 );
 				} );
 			}
@@ -1283,11 +1283,6 @@ namespace rpml
 #endif
 
 			int nElement = x.row();
-
-			for( int i = 0; i < m_layers.size(); i++ )
-			{
-				m_layers[i]->setupPropagation();
-			}
 
 			float loss = 0.0f;
 			std::mutex lmutex;

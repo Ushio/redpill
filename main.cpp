@@ -7,7 +7,6 @@
 #include "redpill.hpp"
 using namespace rpml;
 
-
 //#include <json.hpp>
 //#include <sciplot/sciplot.hpp>
 //using namespace sciplot;
