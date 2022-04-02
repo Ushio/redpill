@@ -440,7 +440,7 @@ namespace rpml
 	class OptimizerAdam : public Optimizer
 	{
 	public:
-		OptimizerAdam( float alpha, float beta1 = 0.9f, float beta2 = 0.999f, float e = 0.00000001f ) 
+		OptimizerAdam( float alpha, float beta1 = 0.9f, float beta2 = 0.999f, float e = 10.0e-15f ) 
 			: m_alpha( alpha ), m_beta1( beta1 ), m_beta2( beta2 ), m_beta1t( 1.0f ), m_beta2t( 1.0f ), m_e( e )
 		{
 		}
