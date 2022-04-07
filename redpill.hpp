@@ -389,6 +389,16 @@ namespace rpml
 		return *reinterpret_cast<float*>( &u );
 	}
 
+	inline void atomAdd( std::atomic<float>* p, float v )
+	{
+		float curVal = p->load();
+		float newVal;
+		do
+		{
+			newVal = curVal + v;
+		}
+		while( p->compare_exchange_weak( curVal, newVal ) == false );
+	}
 	inline void atomAdd( float* p, float v )
 	{
 		// https://docs.microsoft.com/en-us/windows/win32/winprog/windows-data-types
@@ -917,6 +927,10 @@ namespace rpml
 
 			float b() const
 			{
+				if( L <= 1 )
+				{
+					return 1.0f;
+				}
 				return std::exp( std::log( (float)Nmax / (float)Nmin ) / ( L - 1 ) );
 			}
 		};

@@ -13,19 +13,39 @@ TEST_CASE( "misc", "[misc]" )
 
 	pr::ThreadPool pool( std::thread::hardware_concurrency() );
 
-	int N = 8388608;
-	float v = 0.0f;
+	for( int i = 0; i < 100; i++ )
+	{
+		int N = 8388608;
+		float v = 0.0f;
 
-	pr::TaskGroup g;
-	g.addElements( N );
-	pool.enqueueFor( N, 1000, [&v, &g]( int64_t beg, int64_t end )
-	{ 
-		atomAdd( &v, end - beg );
-		g.doneElements( end - beg );
-	} );
-	g.waitForAllElementsToFinish();
+		pr::TaskGroup g;
+		g.addElements( N );
+		pool.enqueueFor( N, 1000, [&v, &g]( int64_t beg, int64_t end )
+		{
+			atomAdd( &v, end - beg );
+			g.doneElements( end - beg );
+		} );
+		g.waitForAllElementsToFinish();
 
-	REQUIRE( v == N );
+		REQUIRE( v == N );
+	}
+
+
+	for(int i = 0 ; i < 100 ; i++ ) {
+		int N = 8388608;
+		std::atomic<float> v = 0.0f;
+
+		pr::TaskGroup g;
+		g.addElements( N );
+		pool.enqueueFor( N, 1000, [&v, &g]( int64_t beg, int64_t end )
+		{
+			atomAdd( &v, end - beg );
+			g.doneElements( end - beg );
+		} );
+		g.waitForAllElementsToFinish();
+
+		REQUIRE( v == N );
+	}
 }
 TEST_CASE("Mat transpose", "[transpose]") {
     Mat a = fromColMajor(2, 3, { 1, 4, 2, 5, 3, 6 });
