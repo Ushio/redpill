@@ -3,6 +3,30 @@
 
 #include "redpill.hpp"
 using namespace rpml;
+
+constexpr float abs_constant( float x )
+{
+	return x < 0.0f ? -x : x;
+}
+constexpr float newton_sqrt_r( float xn, float a, int e )
+{
+	float xnp1 = xn - ( xn * xn - a ) * 0.5f / xn;
+	float e0 = abs_constant( xn * xn - a );
+	float e1 = abs_constant( xnp1 * xnp1 - a );
+	return ( e1 < e0 )
+			   ? newton_sqrt_r( xnp1, a, e )
+			   : ( e < 4 /* magic number */ ? newton_sqrt_r( xnp1, a, e + 1 ) : xn );
+}
+constexpr float newton_sqrt( float x )
+{
+	bool valid =
+		0.0f <= x &&
+		x < std::numeric_limits<float>::infinity() &&
+		x == x; // nan
+	return valid
+			   ? ( x == 0.0f ? 0.0f : newton_sqrt_r( x, x, 0 ) )
+			   : std::numeric_limits<double>::quiet_NaN();
+}
 TEST_CASE( "misc", "[misc]" )
 {
 	REQUIRE( next_multiple( 0, 10 ) == 0 );
@@ -46,7 +70,19 @@ TEST_CASE( "misc", "[misc]" )
 
 		REQUIRE( v == N );
 	}
+
+	static_assert( newton_sqrt( 0.0f ) == 0.0f, "" );
+	REQUIRE( std::isnan( newton_sqrt( std::numeric_limits<float>::infinity() ) ) );
+	REQUIRE( std::isnan( newton_sqrt( -1.0f ) ) );
+
+	StandardRng rng;
+	for( int i = 0; i < 1000000; i++ )
+	{
+		float x = rng.draw() * 1000.0f;
+		REQUIRE( Approx( std::sqrt( x ) ).margin( 0.0000001f ) == newton_sqrt( x ) );
+	}
 }
+
 TEST_CASE("Mat transpose", "[transpose]") {
     Mat a = fromColMajor(2, 3, { 1, 4, 2, 5, 3, 6 });
     Mat b = fromRowMajor(2, 3, { 1, 2, 3, 4, 5, 6 });

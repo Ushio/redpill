@@ -466,42 +466,7 @@ namespace rpml
 			m_beta1t *= m_beta1;
 			m_beta2t *= m_beta2;
 
-#if ENABLE_SIMD
-			__m256 alpha = _mm256_set1_ps( m_alpha );
-			__m256 beta1 = _mm256_set1_ps( m_beta1 );
-			__m256 beta2 = _mm256_set1_ps( m_beta2 );
-			__m256 beta1t = _mm256_set1_ps( m_beta1t );
-			__m256 beta2t = _mm256_set1_ps( m_beta2t );
-			__m256 e = _mm256_set1_ps( m_e );
-			__m256 one = _mm256_set1_ps( 1.0f );
-
-			int ix = 0;
-			while( ix < ( *parameter ).col() )
-			{
-				int iy = 0;
-				while( iy < ( *parameter ).row() )
-				{
-					__m256 g = _mm256_loadu_ps( &gradient( ix, iy ) );
-					__m256 gg = _mm256_mul_ps( g, g );
-					__m256 m = _mm256_loadu_ps( &m_m( ix, iy ) );
-					__m256 v = _mm256_loadu_ps( &m_v( ix, iy ) );
-					m = _mm256_add_ps( _mm256_mul_ps( beta1, m ), _mm256_mul_ps( _mm256_sub_ps( one, beta1 ), g ) );
-					v = _mm256_add_ps( _mm256_mul_ps( beta2, v ), _mm256_mul_ps( _mm256_sub_ps( one, beta2 ), gg ) );
-					_mm256_storeu_ps( &m_m( ix, iy ), m );
-					_mm256_storeu_ps( &m_v( ix, iy ), v );
-
-					__m256 m_hat = _mm256_div_ps( m, _mm256_sub_ps( one, beta1t ) );
-					__m256 v_hat = _mm256_div_ps( v, _mm256_sub_ps( one, beta2t ) );
-
-					__m256 p = _mm256_loadu_ps( &( ( *parameter )( ix, iy ) ) );
-					p = _mm256_sub_ps( p, _mm256_div_ps( _mm256_mul_ps( alpha, m_hat ), _mm256_add_ps( _mm256_sqrt_ps( v_hat ), e ) ) );
-
-					_mm256_storeu_ps( &( ( *parameter )( ix, iy ) ), p );
-					iy += 8;
-				}
-				ix++;
-			}
-#else
+			float s = m_alpha / nElement;
 			FOR_EACH_ELEMENT( ( *parameter ), ix, iy )
 			{
 				float g = gradient( ix, iy );
@@ -509,11 +474,41 @@ namespace rpml
 				float v = m_v( ix, iy ) = m_beta2 * m_v( ix, iy ) + ( 1.0f - m_beta2 ) * g * g;
 				float m_hat = m / ( 1.0f - m_beta1t );
 				float v_hat = v / ( 1.0f - m_beta2t );
-				( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - m_alpha * m_hat / ( std::sqrt( v_hat ) + m_e );
+				( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - s * m_hat / ( std::sqrt( v_hat ) + m_e );
 			}
-#endif
 		}
 
+		// must call this before optimizeHashGridRow
+		void incrementParametereHashGridRow()
+		{
+			m_beta1t *= m_beta1;
+			m_beta2t *= m_beta2;
+		}
+		// gradient will be cleared.
+		void optimizeHashGridRow( Mat* parameter, Mat* gradient, int nElement, int* indices, int nIndices )
+		{
+			float s = m_alpha / nElement;
+
+			for( int i = 0; i < nIndices; i++ )
+			{
+				int iy = indices[i];
+				for( int ix = 0; ix < ( *parameter ).col(); ix++ )
+				{
+					float g = ( *gradient )( ix, iy );
+					if( g == 0.0f )
+					{
+						continue;
+					}
+					( *gradient )( ix, iy ) = 0.0f;
+
+					float m = m_m( ix, iy ) = m_beta1 * m_m( ix, iy ) + ( 1.0f - m_beta1 ) * g;
+					float v = m_v( ix, iy ) = m_beta2 * m_v( ix, iy ) + ( 1.0f - m_beta2 ) * g * g;
+					float m_hat = m / ( 1.0f - m_beta1t );
+					float v_hat = v / ( 1.0f - m_beta2t );
+					( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - s * m_hat / ( std::sqrt( v_hat ) + m_e );
+				}
+			}
+		}
 	private:
 		float m_alpha;
 		float m_beta1;
@@ -920,7 +915,7 @@ namespace rpml
 		struct Config
 		{
 			int L = 16;
-			int T = std::pow( 2, 15 );
+			int T = std::pow( 2, 20 );
 			int F = 2;
 			int Nmin = 16;
 			int Nmax = 7500;
@@ -934,6 +929,12 @@ namespace rpml
 				return std::exp( std::log( (float)Nmax / (float)Nmin ) / ( L - 1 ) );
 			}
 		};
+
+		enum
+		{
+			NIndexBuckets = 4
+		};
+
 		static int output( int input, const Config& config )
 		{
 			return config.L * config.F + input;
@@ -949,17 +950,18 @@ namespace rpml
 			}
 			return h;
 		}
-		MultiResolutionHashEncoder( int i, int o, const Config& config, OptimizerType optimizerType, float learningRate ) : Layer( i, o ), m_config( config ) 
+		MultiResolutionHashEncoder( int i, int o, const Config& config, OptimizerType optimizerType, float learningRate ) : Layer( i, o ), m_config( config )
 		{
 			m_features.resize( m_config.L );
 			m_dfeatures.resize( m_config.L );
 			m_optimizers.resize( m_config.L );
+			m_drowIndices.resize( m_config.L * NIndexBuckets );
 			for( int i = 0; i < m_config.L ; i++ )
 			{
 				m_features[i].setShape( m_config.T, m_config.F );
 				m_dfeatures[i].setShape( m_config.T, m_config.F );
 				m_dfeatures[i].fill( 0.0f );
-				m_optimizers[i] = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
+				m_optimizers[i] = std::unique_ptr<OptimizerAdam>( new OptimizerAdam( learningRate ) );
 				m_optimizers[i]->initialize( m_config.T, m_config.F );
 			}
 		}
@@ -1004,13 +1006,16 @@ namespace rpml
 			std::vector<uint32_t> hash_inputs( dim );
 			std::vector<float> featureVector( m_config.F );
 
-			for( int row = 0; row < value.row() ; row++ )
+			float resolution = m_config.Nmin;
+			for( int l = 0 ; l < m_config.L ; l++ )
 			{
-				float resolution = m_config.Nmin;
-				for( int l = 0 ; l < m_config.L ; l++ )
-				{
-					float res = floor( resolution );
+				float res = floor( resolution );
+				
+				// go to next resolution
+				resolution *= b;
 
+				for( int row = 0; row < value.row() ; row++ )
+				{
 					// get hash_inputs and its hash_coordinate
 					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
 					{
@@ -1065,9 +1070,6 @@ namespace rpml
 					{
 						( *r )( m_config.F * l + fdim, row ) = featureVector[fdim];
 					}
-					
-					// go to next resolution
-					resolution *= b;
 				}
 			}
 		}
@@ -1084,14 +1086,16 @@ namespace rpml
 
 			std::vector<uint32_t> hash_inputs( dim );
 			std::vector<float> dfeatureVector( dim );
+			std::vector<int> drowIndices[NIndexBuckets];
 
-			for( int row = 0; row < value.row(); row++ )
+			float resolution = m_config.Nmin;
+			for( int l = 0; l < m_config.L; l++ )
 			{
-				float resolution = m_config.Nmin;
-				for( int l = 0; l < m_config.L; l++ )
-				{
-					float res = floor( resolution );
+				float res = floor( resolution );
+				resolution *= b; // go to next resolution
 
+				for( int row = 0; row < value.row(); row++ )
+				{
 					// get hash_inputs and its hash_coordinate
 					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
 					{
@@ -1133,58 +1137,80 @@ namespace rpml
 					{
 						float w = weights[bits];
 						uint32_t index = hash_coordinate[bits] % m_config.T;
+						bool touch = false;
 						for( int fdim = 0; fdim < m_config.F; fdim++ )
 						{
-							float g = gradient( m_config.F * l + fdim, row );
-							atomAdd( &dfeature( fdim, index ), g * w );
+							float g = gradient( m_config.F * l + fdim, row ) * w;
+							if( g != 0.0f )
+							{
+								atomAdd( &dfeature( fdim, index ), g );
+								touch = true;
+							}
+						}
+						
+						if( touch )
+						{
+							int bIndex = index % NIndexBuckets;
+							drowIndices[bIndex].push_back( index );
 						}
 					}
+				}
 
-					// go to next resolution
-					resolution *= b;
+				std::lock_guard<std::mutex> lc( m_dIndicesMutex );
+				for( int bi = 0; bi < NIndexBuckets; ++bi )
+				{
+					int dIndex = l * NIndexBuckets + bi;
+					m_drowIndices[dIndex].reserve( m_drowIndices[dIndex].size() + drowIndices[bi].size() );
+					for( int index : drowIndices[bi] )
+					{
+						m_drowIndices[dIndex].push_back( index );
+					}
+					drowIndices[bi].clear();
 				}
 			}
 		}
 		
-		
 		virtual void optimize( int nElement, pr::ThreadPool* pool ) 
 		{
-#if 0
-			for( int i = 0; i < m_config.L ; i++ )
-			{
-				m_optimizers[i]->optimize( &m_features[i], m_dfeatures[i], nElement );
-				m_dfeatures[i].fill( 0.0f );	
-			}
-#else
 			pr::TaskGroup g;
-			g.addElements( m_config.L );
-			for( int i = 0; i < m_config.L; i++ )
+			g.addElements( m_config.L * NIndexBuckets );
+			for( int l = 0; l < m_config.L; l++ )
 			{
-				int index = i;
-				pool->enqueueTask( [index, nElement, this, &g]() 
-				{ 
-#if ENABLE_TRACE
-					pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
-					tr.label( "m_optimizers[index]" );
-#endif
-					m_optimizers[index]->optimize( &m_features[index], m_dfeatures[index], nElement ); 
-					m_dfeatures[index].fill( 0.0f );
+				int lIndex = l;
+				m_optimizers[lIndex]->incrementParametereHashGridRow();
+				for( int bi = 0; bi < NIndexBuckets ; bi++ )
+				{
+					int bIndex = bi;
 
-					g.doneElements( 1 );
-				} );
+					pool->enqueueTask( [lIndex, bIndex, nElement, this, &g]() 
+					{ 
+	#if ENABLE_TRACE
+						pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+						tr.label( "m_optimizers[index]" );
+	#endif
+						int indicesIndex = lIndex * NIndexBuckets + bIndex;
+						m_optimizers[lIndex]->optimizeHashGridRow( &m_features[lIndex], &m_dfeatures[lIndex], nElement, m_drowIndices[indicesIndex].data(), m_drowIndices[indicesIndex].size() );
+						m_drowIndices[indicesIndex].clear();
+
+						g.doneElements( 1 );
+					} );
+				}
+
 			}
 			while( !g.isFinished() )
 			{
 				pool->processTask();
 			}
-#endif
 		}
 
 		Config m_config;
 
 		std::vector<Mat> m_features;
 		std::vector<Mat> m_dfeatures;
-		std::vector<std::unique_ptr<Optimizer>> m_optimizers;
+		std::vector<std::unique_ptr<OptimizerAdam>> m_optimizers;
+
+		std::mutex m_dIndicesMutex;
+		std::vector<std::vector<int>> m_drowIndices;
 	};
 
 	class MLPConfig
@@ -1312,6 +1338,7 @@ namespace rpml
 				pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
 				tr.label( "train task" );
 #endif
+				// unsigned int fp_control_state = _controlfp( _EM_INEXACT, _MCW_EM );
 
 				std::shared_ptr<LocalStorage> localStorage = acquireLocalStorage();
 				localStorage->layerContexts.resize( m_layers.size() );

@@ -180,12 +180,12 @@ int main()
 	//}
 
 	//float vals[2][2]    = {};
-	
+
 
 	Image2DRGBA8 image;
 	//image.load( "img/albert.jpg" );
-	image.load( "img/small_albert.jpg" );
-	//image.load( "img/coyote.jpg" );
+	//image.load( "img/small_albert.jpg" );
+	image.load( "img/coyote.jpg" );
 
 	float previewScale = 1.0f;
 
@@ -193,7 +193,7 @@ int main()
 
 	MLP mlp( MLPConfig()
 				 .shape( { 2, 64, 64, 3 } )
-				 .learningRate( 0.01f )
+				 .learningRate( 10.0f )
 				 .initType( InitializationType::He )
 				 .optimType( OptimizerType::Adam )
 				 .activationType( ActivationType::ReLU )
