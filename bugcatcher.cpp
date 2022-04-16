@@ -4,29 +4,6 @@
 #include "redpill.hpp"
 using namespace rpml;
 
-constexpr float abs_constant( float x )
-{
-	return x < 0.0f ? -x : x;
-}
-constexpr float newton_sqrt_r( float xn, float a, int e )
-{
-	float xnp1 = xn - ( xn * xn - a ) * 0.5f / xn;
-	float e0 = abs_constant( xn * xn - a );
-	float e1 = abs_constant( xnp1 * xnp1 - a );
-	return ( e1 < e0 )
-			   ? newton_sqrt_r( xnp1, a, e )
-			   : ( e < 4 /* magic number */ ? newton_sqrt_r( xnp1, a, e + 1 ) : xn );
-}
-constexpr float newton_sqrt( float x )
-{
-	bool valid =
-		0.0f <= x &&
-		x < std::numeric_limits<float>::infinity() &&
-		x == x; // nan
-	return valid
-			   ? ( x == 0.0f ? 0.0f : newton_sqrt_r( x, x, 0 ) )
-			   : std::numeric_limits<double>::quiet_NaN();
-}
 TEST_CASE( "misc", "[misc]" )
 {
 	REQUIRE( next_multiple( 0, 10 ) == 0 );

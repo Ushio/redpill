@@ -36,6 +36,7 @@
 #include "prtr.hpp"
 #endif
 
+#define NOMINMAX
 #include <Windows.h>
 
 namespace rpml
@@ -74,6 +75,75 @@ namespace rpml
 	inline int next_multiple( int val, int divisor )
 	{
 		return div_round_up( val, divisor ) * divisor;
+	}
+
+	constexpr float abs_constant( float x )
+	{
+		return x < 0.0f ? -x : x;
+	}
+	constexpr float newton_sqrt_r( float xn, float a, int e )
+	{
+		float xnp1 = xn - ( xn * xn - a ) * 0.5f / xn;
+		float e0 = abs_constant( xn * xn - a );
+		float e1 = abs_constant( xnp1 * xnp1 - a );
+		return ( e1 < e0 )
+				   ? newton_sqrt_r( xnp1, a, e )
+				   : ( e < 4 /* magic number */ ? newton_sqrt_r( xnp1, a, e + 1 ) : xn );
+	}
+	constexpr float newton_sqrt( float x )
+	{
+		bool valid =
+			0.0f <= x &&
+			x < std::numeric_limits<float>::infinity() &&
+			x == x; // nan
+		return valid
+				   ? ( x == 0.0f ? 0.0f : newton_sqrt_r( x, x, 0 ) )
+				   : std::numeric_limits<double>::quiet_NaN();
+	}
+
+	void sh_L4( float v[16], float x, float y, float z )
+	{
+		constexpr float rpi = newton_sqrt( pi );
+		constexpr float r3 = newton_sqrt( 3.0f );
+		constexpr float r15 = newton_sqrt( 15.0f );
+		constexpr float r5 = newton_sqrt( 5.0f );
+		constexpr float r2 = newton_sqrt( 2.0f );
+		constexpr float r35 = newton_sqrt( 35.0f );
+		constexpr float r105 = newton_sqrt( 105.0f );
+		constexpr float r21 = newton_sqrt( 21.0f );
+		constexpr float r7 = newton_sqrt( 7 );
+
+		const float xy = x * y;
+		const float yz = y * z;
+		const float xz = x * z;
+		const float xx = x * x;
+		const float yy = y * y;
+		const float zz = z * z;
+		const float xyz = xy * z;
+
+		// L=0
+		v[0] = +1.0f / ( 2.0f * rpi ); // M=0
+
+		// L=1
+		v[1] = -( r3 / ( 2.0f * rpi ) ) * y;
+		v[2] = +( r3 / ( 2.0f * rpi ) ) * z;
+		v[3] = -( r3 / ( 2.0f * rpi ) ) * x;
+
+		// L=2
+		v[4] = +( r15 / ( 2.0f * rpi ) ) * xy;
+		v[5] = -( r15 / ( 2.0f * rpi ) ) * yz;
+		v[6] = +( r5 / ( 4.0f * rpi ) ) * ( 3.0f * z * z - 1.0f );
+		v[7] = -( r15 / ( 2.0f * rpi ) ) * xz;
+		v[8] = +( r15 / ( 4.0f * rpi ) ) * ( xx - yy );
+
+		// L=3
+		v[9] = -( r2 * r35 / ( 8.0f * rpi ) ) * y * ( 3.0f * xx - yy );
+		v[10] = +( r105 / ( 2.0f * rpi ) ) * xyz;
+		v[11] = -( r2 * r21 / ( 8.0f * rpi ) ) * y * ( -1.0f + 5.0f * zz );
+		v[12] = +( r7 / ( 4.0f * rpi ) ) * z * ( 5.0f * z * z - 3.0f );
+		v[13] = -( r2 * r21 / ( 8.0f * rpi ) ) * x * ( -1.0f + 5.0f * zz );
+		v[14] = +( r105 / ( 4.0f * rpi ) ) * ( xx - yy ) * z;
+		v[15] = -( r2 * r35 / ( 8.0f * rpi ) ) * x * ( xx - 3.0f * yy );
 	}
 
 	namespace details
@@ -378,6 +448,10 @@ namespace rpml
 	{
 		return ( b < a ) ? a : b;
 	}
+	inline float clampss( float x, float a, float b )
+	{
+		return minss( maxss( x, a ), b );
+	}
 
 	// atomic
 	inline int32_t as_int32( float f )
@@ -567,23 +641,27 @@ namespace rpml
 	{
 	public:
 		virtual ~Rng() {}
-		virtual float draw() = 0;
+		float draw()
+		{
+			uint32_t x = drawUInt();
+			uint32_t bits = ( x >> 9 ) | 0x3f800000;
+			float value = *reinterpret_cast<float*>( &bits ) - 1.0f;
+			return value;
+		}
+		virtual uint32_t drawUInt() = 0;
 	};
 	class StandardRng : public Rng
 	{
 	public:
 		StandardRng( ) 
 		{
-			pcg::pcg32_srandom_r( &m_rng, 541, 0 );
-		}
-		virtual float draw()
-		{
-			uint32_t x = pcg32_random_r( &m_rng );
-			uint32_t bits = (x >> 9) | 0x3f800000;
-			float value = *reinterpret_cast<float *>(&bits) - 1.0f;
-			return value;
+			pcg::pcg32_srandom_r( &m_rng, 543, 0 );
 		}
 
+		virtual uint32_t drawUInt()
+		{
+			return pcg32_random_r( &m_rng );
+		}
 	private:
 		pcg::pcg_state_setseq_64 m_rng;
 	};
@@ -654,22 +732,28 @@ namespace rpml
 		int m_outputDimensions;
 	};
 
+#define ENABLE_BIAS 0
+
 	class AffineLayer : public Layer
 	{
 	public:
 		AffineLayer( int i, int o, OptimizerType optimizerType, float learningRate ) 
 			: Layer( i, o ) 
 			, m_W( i, o ) 
-			, m_b( 1, o ) 
 			, m_dW( i, o )
+#if ENABLE_BIAS
+			, m_b( 1, o ) 
 			, m_db( 1, o )
+#endif
 		{
 			m_oW = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
-			m_ob = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
 			m_oW->initialize( m_W.row(), m_W.col() );
-			m_ob->initialize( m_b.row(), m_b.col() );
 			m_dW.fill( 0.0f );
+#if ENABLE_BIAS
+			m_ob = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
+			m_ob->initialize( m_b.row(), m_b.col() );
 			m_db.fill( 0.0f );
+#endif
 		}
 		virtual void initialize( InitializationType initType , Rng* rng )
 		{
@@ -681,10 +765,12 @@ namespace rpml
 				{
 					m_W( ix, iy ) = drawRange( -k, k, rng );
 				}
+#if ENABLE_BIAS
 				FOR_EACH_ELEMENT( m_b, ix, iy )
 				{
 					m_b( ix, iy ) = drawRange( -k, k, rng );
 				}
+#endif
 			} 
 			else if( initType == InitializationType::He )
 			{
@@ -694,10 +780,12 @@ namespace rpml
 				{
 					m_W( ix, iy ) = m.draw() * s;
 				}
+#if ENABLE_BIAS
 				FOR_EACH_ELEMENT( m_b, ix, iy )
 				{
 					m_b( ix, iy ) = m.draw() * s;
 				}
+#endif
 			}
 			else
 			{
@@ -711,7 +799,10 @@ namespace rpml
 				context->var( "x" ) = value; // input ( N, input )
 			}
 			mul( r, value, m_W );
+
+#if ENABLE_BIAS
 			addVectorForEachRow( r, m_b );
+#endif
 		}
 		virtual void backward( Mat* r, const Mat& gradient, MatContext* context )
 		{
@@ -721,13 +812,16 @@ namespace rpml
 			transpose( &trx, x );
 			mul( &dW, trx, gradient );
 
+#if ENABLE_BIAS
 			Mat& db = context->var( "db" );
 			vertialSum( &db, gradient );
-
+#endif
 			{
 				std::lock_guard<std::mutex> lc( m_dmutex );
 				add( &m_dW, dW );
+#if ENABLE_BIAS
 				add( &m_db, db );
+#endif
 			}
 
 			Mat& trW = context->var( "trW" );
@@ -737,15 +831,15 @@ namespace rpml
 		virtual void optimize( int nElement, pr::ThreadPool* pool ) 
 		{
 			m_oW->optimize( &m_W, m_dW, nElement );
-			m_ob->optimize( &m_b, m_db, nElement );
-
-			// clean up
 			m_dW.fill( 0.0f ); 
+#if ENABLE_BIAS
+			m_ob->optimize( &m_b, m_db, nElement );
 			m_db.fill( 0.0f );
+#endif
 		}
 		Mat m_W;  // ( input, output )
-		Mat m_b;  // ( 1, output )
 		Mat m_dW; // Å›L/Å›W = ( input, output )
+		Mat m_b;  // ( 1, output )
 		Mat m_db; // Å›L/Å›b = ( 1, output )
 		std::unique_ptr<Optimizer> m_oW;
 		std::unique_ptr<Optimizer> m_ob;
@@ -937,7 +1031,7 @@ namespace rpml
 
 		static int output( int input, const Config& config )
 		{
-			return config.L * config.F + input;
+			return config.L * config.F;
 		}
 		uint32_t hash_nd( const uint32_t* xis, int d )
 		{
@@ -950,7 +1044,7 @@ namespace rpml
 			}
 			return h;
 		}
-		MultiResolutionHashEncoder( int i, int o, const Config& config, OptimizerType optimizerType, float learningRate ) : Layer( i, o ), m_config( config )
+		MultiResolutionHashEncoder( int i, int o, const Config& config, float learningRate ) : Layer( i, o ), m_config( config )
 		{
 			m_features.resize( m_config.L );
 			m_dfeatures.resize( m_config.L );
@@ -986,15 +1080,6 @@ namespace rpml
 			if( context )
 			{
 				context->var( "value" ) = value;
-			}
-
-			// copy original 
-			for( int row = 0; row < value.row(); row++ )
-			{
-				for( int col = 0; col < value.col(); col++ )
-				{
-					( *r )( m_config.F * m_config.L + col, row ) = value( col, row );
-				}
 			}
 
 			const int dim = inputDimensions();
@@ -1150,7 +1235,8 @@ namespace rpml
 						
 						if( touch )
 						{
-							int bIndex = index % NIndexBuckets;
+							int bIndex = index / ( m_config.T / NIndexBuckets );
+							RPML_ASSERT( bIndex < NIndexBuckets );
 							drowIndices[bIndex].push_back( index );
 						}
 					}
@@ -1273,7 +1359,7 @@ namespace rpml
 					else if( config.m_encoderType == EncoderType::MultiResolutionHash )
 					{
 						int encoderOutput = MultiResolutionHashEncoder::output( input, MultiResolutionHashEncoder::Config() );
-						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new MultiResolutionHashEncoder( input, encoderOutput, MultiResolutionHashEncoder::Config(), config.m_optimType, config.m_learningRate ) );
+						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new MultiResolutionHashEncoder( input, encoderOutput, MultiResolutionHashEncoder::Config(), config.m_learningRate ) );
 						encoder->initialize( config.m_initType, rng.get() );
 						m_layers.emplace_back( std::move( encoder ) );
 
@@ -1473,4 +1559,450 @@ namespace rpml
 		std::map<std::thread::id, std::shared_ptr<LocalStorage>> m_localStorages;
 		std::mutex m_localMutex;
 	};
+
+	struct NeRFInput
+	{
+		float ro[3];
+		float rd[3];
+	};
+	struct NeRFOutput
+	{
+		float color[3];
+	};
+	struct NeRFMarching
+	{
+		int beg;
+		int end;
+	};
+
+	class NeRF
+	{
+	public:
+		enum
+		{
+			MLP_DENSITY_OUT = 16,
+			MLP_WIDTH = 64,
+			MLP_STEP = 64,
+		};
+		NeRF( ) : m_pool( std::thread::hardware_concurrency() )
+		{
+			std::unique_ptr<Rng> rng = std::unique_ptr<Rng>( new StandardRng() );
+			
+			float learningRate = 0.1f;
+			InitializationType initializerType = InitializationType::He;
+			int input = 3; /* xyz */
+			int output = 0;
+
+			auto createActivation = []( int output )
+			{
+				return std::unique_ptr<Layer>( new ReLULayer( output, output ) );
+				// return std::unique_ptr<Layer>( new LeakyReLULayer( output, output, 0.05f ) );
+			};
+
+			// density network
+
+			{   // encoding
+				int encoderOutput = MultiResolutionHashEncoder::output( 3, MultiResolutionHashEncoder::Config() );
+				std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new MultiResolutionHashEncoder( input, encoderOutput, MultiResolutionHashEncoder::Config(), learningRate ) );
+				encoder->initialize( initializerType, rng.get() );
+				m_densityLayers.emplace_back( std::move( encoder ) );
+				input = encoderOutput;
+			}
+
+			{   // hidden
+				output = MLP_WIDTH;
+
+				std::unique_ptr<Layer> layer( new AffineLayer( input, output, OptimizerType::Adam, learningRate ) );
+				layer->initialize( initializerType, rng.get() );
+				m_densityLayers.emplace_back( std::move( layer ) );
+
+				std::unique_ptr<Layer> activation = createActivation( output );
+				activation->initialize( initializerType, rng.get() );
+				m_densityLayers.emplace_back( std::move( activation ) );
+				input = output;
+			}
+			{ // out
+				output = MLP_DENSITY_OUT;
+
+				std::unique_ptr<Layer> layer( new AffineLayer( input, output, OptimizerType::Adam, learningRate ) );
+				layer->initialize( initializerType, rng.get() );
+				m_densityLayers.emplace_back( std::move( layer ) );
+
+				std::unique_ptr<Layer> activation = createActivation( output );
+				activation->initialize( initializerType, rng.get() );
+				m_densityLayers.emplace_back( std::move( activation ) );
+				input = output;
+			}
+
+			// color network
+			input += 16; // dir SH encoding
+
+			std::vector<int> colorShape = { input, MLP_WIDTH, MLP_WIDTH, 3 };
+			for( int i = 0; i < colorShape.size() - 1; i++ )
+			{
+				int input = colorShape[i];
+				int output = colorShape[i + 1];
+
+				std::unique_ptr<Layer> layer( new AffineLayer( input, output, OptimizerType::Adam, learningRate ) );
+				layer->initialize( initializerType, rng.get() );
+				m_colorLayers.emplace_back( std::move( layer ) );
+
+				bool isLast = i + 1 == colorShape.size() - 1;
+				if( !isLast )
+				{
+					std::unique_ptr<Layer> activation = createActivation( output );
+					activation->initialize( initializerType, rng.get() );
+					m_colorLayers.emplace_back( std::move( activation ) );
+				}
+			}
+		}
+
+		float train( const NeRFInput* inputs, const NeRFOutput* outputs, int nElement )
+		{
+			// unsigned int fp_control_state = _controlfp( _EM_INEXACT, _MCW_EM );
+
+			std::vector<NeRFMarching> marchings;
+			std::vector<float> points;
+
+			const float dt = std::sqrt( 3.0f ) / MLP_STEP;
+			for( int i = 0; i < nElement ; i++ )
+			{
+				NeRFInput input = inputs[i];
+
+				NeRFMarching m;
+				m.beg = points.size() / 3;
+
+				int nSteps = 0;
+				for( ; ; )
+				{
+					float t = dt * nSteps++;
+					float x = input.ro[0] + input.rd[0] * t;
+					float y = input.ro[1] + input.rd[1] * t;
+					float z = input.ro[2] + input.rd[2] * t;
+					
+					// todo: adjust range
+					const float eps = 0.000001f;
+					if( x < -eps || 1.0f + eps < x || y < -eps || 1.0f + eps < y || z < -eps || 1.0f + eps < z )
+					{
+						break;
+					}
+
+					x = clampss( x, 0.0f, 1.0f );
+					y = clampss( y, 0.0f, 1.0f );
+					z = clampss( z, 0.0f, 1.0f );
+
+					points.push_back( x );
+					points.push_back( y );
+					points.push_back( z );
+				}
+
+				m.end = points.size() / 3;
+				marchings.push_back( m );
+			}
+
+			Mat inputMat( points.size() / 3, 3 );
+			Mat outputMat;
+
+			for( int i = 0; i < points.size() / 3; i++ )
+			{
+				inputMat( 0, i ) = points[i * 3];
+				inputMat( 1, i ) = points[i * 3 + 1];
+				inputMat( 2, i ) = points[i * 3 + 2];
+			}
+
+			LocalStorage densityStorage;
+			LocalStorage colorStorage;
+			densityStorage.layerContexts.resize( m_densityLayers.size() );
+			colorStorage.layerContexts.resize( m_colorLayers.size() );
+
+			for( int i = 0; i < m_densityLayers.size(); i++ )
+			{
+				RPML_ASSERT( inputMat.col() == m_densityLayers[i]->inputDimensions() );
+				m_densityLayers[i]->forward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
+				RPML_ASSERT( outputMat.col() == m_densityLayers[i]->outputDimensions() );
+				inputMat.swap( outputMat );
+			}
+
+			Mat densityMat = inputMat;
+
+			// combine dir
+			Mat combinedMat( densityMat.row(), densityMat.col() + 16 );
+			for( int i = 0; i < nElement; i++ )
+			{
+				NeRFInput input = inputs[i];
+				float sh_encode[16] = {};
+				sh_L4( sh_encode, input.rd[0], input.rd[1], input.rd[2] );
+
+				for( int j = marchings[i].beg; j < marchings[i].end ; j++ )
+				{
+					// original 
+					for( int k = 0; k < MLP_DENSITY_OUT; ++k )
+					{
+						combinedMat( k, j ) = densityMat( k, j );
+					}
+
+					// dir
+					for(int k = 0 ; k < 16 ; ++k)
+					{
+						combinedMat( MLP_DENSITY_OUT + k, j ) = sh_encode[k];
+					}
+				}
+			}
+			inputMat.swap( combinedMat );
+
+			for( int i = 0; i < m_colorLayers.size(); i++ )
+			{
+				RPML_ASSERT( inputMat.col() == m_colorLayers[i]->inputDimensions() );
+				m_colorLayers[i]->forward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
+				RPML_ASSERT( outputMat.col() == m_colorLayers[i]->outputDimensions() );
+				inputMat.swap( outputMat );
+			}
+			
+			float loss = 0.0f;
+
+			Mat dL_dC( inputMat.row(), inputMat.col() );
+			Mat dL_dSigma( inputMat.row(), 1 );
+			for( int i = 0; i < nElement; i++ )
+			{
+				float oColor[3] = {};
+				float T = 1.0f;
+				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
+				{
+					float sigma = densityMat( 0, j );
+					float c[3];
+					for(int k = 0 ; k < 3 ; k++ )
+					{
+						c[k] = inputMat( k, j );
+					}
+					// printf( "%.15f %.5f\n", sigma, c[0] );
+					float a = 1.0f - std::exp( -sigma * dt );
+					for( int k = 0; k < 3; k++ )
+					{
+						oColor[k] += T * a * c[k];
+					}
+					T *= ( 1.0f - a );
+				}
+				// printf( "%.5f %.5f %.5f\n", oColor[0], oColor[1], oColor[2] );
+
+				float dColor[3];
+				for( int k = 0; k < 3; k++ )
+				{
+					dColor[k] = oColor[k] - outputs[i].color[k];
+					// dColor[k] = outputs[i].color[k] - oColor[k];
+
+					loss += dColor[k] * dColor[k];
+					// printf( "d %.5f\n", dColor[k] );
+				}
+				
+				float oColor2[3] = {};
+				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
+				{
+					float sigma = densityMat( 0, j );
+					float c[3];
+					for( int k = 0; k < 3; k++ )
+					{
+						c[k] = inputMat( k, j );
+					}
+					float a = 1.0f - std::exp( -sigma * dt );
+					for( int k = 0; k < 3; k++ )
+					{
+						float coef = T * a;
+						oColor2[k] += coef * c[k];
+						dL_dC( k, j ) = coef * dColor[k];
+					}
+					T *= ( 1.0f - a );
+
+					float S[3]; 
+					for( int k = 0; k < 3; k++ )
+					{
+						S[k] = oColor[k] - oColor2[k];
+					}
+
+					float dSigma = 0.0f;
+					for( int k = 0; k < 3; k++ )
+					{
+						dSigma += ( T * sigma * c[k] - sigma * S[k] ) * dColor[k];
+					}
+					dL_dSigma( 0, j ) = dSigma;
+				}
+			}
+
+			// backward
+			inputMat = dL_dC;
+			for( int i = (int)m_colorLayers.size() - 1; 0 <= i; i-- )
+			{
+				RPML_ASSERT( inputMat.col() == m_colorLayers[i]->outputDimensions() );
+				m_colorLayers[i]->backward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
+				m_colorLayers[i]->optimize( nElement, &m_pool );
+
+				if( i != 0 )
+				{
+					RPML_ASSERT( outputMat.col() == m_colorLayers[i]->inputDimensions() );
+				}
+				inputMat.swap( outputMat );
+			}
+
+			Mat densityBackwardInput( densityMat.row(), densityMat.col() );
+			for( int iy = 0; iy < densityMat.row(); iy++ )
+			{
+				for( int ix = 0; ix < densityMat.col(); ix++ )
+				{
+					densityBackwardInput( ix, iy ) = inputMat( ix, iy );
+				}
+				densityBackwardInput( 0, iy ) += dL_dSigma( 0, iy );
+			}
+
+			inputMat = densityBackwardInput;
+
+			for( int i = (int)m_densityLayers.size() - 1; 0 <= i; i-- )
+			{
+				RPML_ASSERT( inputMat.col() == m_densityLayers[i]->outputDimensions() );
+				m_densityLayers[i]->backward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
+				m_densityLayers[i]->optimize( nElement, &m_pool );
+
+				if( i != 0 )
+				{
+					RPML_ASSERT( outputMat.col() == m_densityLayers[i]->inputDimensions() );
+				}
+				inputMat.swap( outputMat );
+			}
+
+			return loss;
+		}
+
+		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement )
+		{
+			std::vector<NeRFMarching> marchings;
+			std::vector<float> points;
+
+			const float dt = std::sqrt( 3.0f ) / MLP_STEP;
+			for( int i = 0; i < nElement; i++ )
+			{
+				NeRFInput input = inputs[i];
+
+				NeRFMarching m;
+				m.beg = points.size() / 3;
+
+				int nSteps = 0;
+				for( ;; )
+				{
+					float t = dt * nSteps++;
+					float x = input.ro[0] + input.rd[0] * t;
+					float y = input.ro[1] + input.rd[1] * t;
+					float z = input.ro[2] + input.rd[2] * t;
+
+					// todo: adjust range
+					const float eps = 0.000001f;
+					if( x < -eps || 1.0f + eps < x || y < -eps || 1.0f + eps < y || z < -eps || 1.0f + eps < z )
+					{
+						break;
+					}
+
+					x = clampss( x, 0.0f, 1.0f );
+					y = clampss( y, 0.0f, 1.0f );
+					z = clampss( z, 0.0f, 1.0f );
+
+					points.push_back( x );
+					points.push_back( y );
+					points.push_back( z );
+				}
+
+				m.end = points.size() / 3;
+				marchings.push_back( m );
+			}
+
+			Mat inputMat( points.size() / 3, 3 );
+			Mat outputMat;
+
+			for( int i = 0; i < points.size() / 3; i++ )
+			{
+				inputMat( 0, i ) = points[i * 3];
+				inputMat( 1, i ) = points[i * 3 + 1];
+				inputMat( 2, i ) = points[i * 3 + 2];
+			}
+
+			LocalStorage densityStorage;
+			LocalStorage colorStorage;
+			densityStorage.layerContexts.resize( m_densityLayers.size() );
+			colorStorage.layerContexts.resize( m_colorLayers.size() );
+
+			for( int i = 0; i < m_densityLayers.size(); i++ )
+			{
+				RPML_ASSERT( inputMat.col() == m_densityLayers[i]->inputDimensions() );
+				m_densityLayers[i]->forward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
+				RPML_ASSERT( outputMat.col() == m_densityLayers[i]->outputDimensions() );
+				inputMat.swap( outputMat );
+			}
+
+			Mat densityMat = inputMat;
+
+			// combine dir
+			Mat combinedMat( densityMat.row(), densityMat.col() + 16 );
+			for( int i = 0; i < nElement; i++ )
+			{
+				NeRFInput input = inputs[i];
+				float sh_encode[16] = {};
+				sh_L4( sh_encode, input.rd[0], input.rd[1], input.rd[2] );
+
+				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
+				{
+					// original
+					for( int k = 0; k < MLP_DENSITY_OUT; ++k )
+					{
+						combinedMat( k, j ) = densityMat( k, j );
+					}
+
+					// dir
+					for( int k = 0; k < 16; ++k )
+					{
+						combinedMat( MLP_DENSITY_OUT + k, j ) = sh_encode[k];
+					}
+				}
+			}
+			inputMat.swap( combinedMat );
+
+			for( int i = 0; i < m_colorLayers.size(); i++ )
+			{
+				RPML_ASSERT( inputMat.col() == m_colorLayers[i]->inputDimensions() );
+				m_colorLayers[i]->forward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
+				RPML_ASSERT( outputMat.col() == m_colorLayers[i]->outputDimensions() );
+				inputMat.swap( outputMat );
+			}
+
+			float loss = 0.0f;
+
+			Mat dL_dC( inputMat.row(), inputMat.col() );
+			Mat dL_dSigma( inputMat.row(), 1 );
+			for( int i = 0; i < nElement; i++ )
+			{
+				float oColor[3] = {};
+				float T = 1.0f;
+				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
+				{
+					float sigma = densityMat( 0, j );
+					float c[3];
+					for( int k = 0; k < 3; k++ )
+					{
+						c[k] = inputMat( k, j );
+					}
+					float a = 1.0f - std::exp( -sigma * dt );
+					for( int k = 0; k < 3; k++ )
+					{
+						oColor[k] += T * a * c[k];
+					}
+					T *= ( 1.0f - a );
+				}
+
+				for( int k = 0; k < 3; ++k )
+				{
+					outputs[i].color[k] = oColor[k];
+				}
+			}
+		}
+
+		std::vector<std::unique_ptr<Layer>> m_densityLayers;
+		std::vector<std::unique_ptr<Layer>> m_colorLayers;
+		pr::ThreadPool m_pool;
+	};
+
 } // namespace rpml

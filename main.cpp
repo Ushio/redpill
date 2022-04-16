@@ -186,7 +186,7 @@ int main()
 	//image.load( "img/albert.jpg" );
 	//image.load( "img/small_albert.jpg" );
 	image.load( "img/coyote.jpg" );
-
+	
 	float previewScale = 1.0f;
 
 	ITexture *texture = CreateTexture();
@@ -234,7 +234,7 @@ int main()
 		static int iterations = 0;
 
 		float loss = 0;
-		int NData = 256 * 16;
+		int NData = 256 * 8;
 		static Mat inputs( NData, 2 );
 		static Mat refs( NData, 3 );
 
@@ -275,7 +275,7 @@ int main()
 		texture->upload( estimatedImage );
 
 		float sUpload = sw_upload.elapsed();
-
+		
 		//char name[256];
 		//sprintf( name, "estimated_%03d.png", iterations );
 		//estimatedImage.saveAsPng( name );
