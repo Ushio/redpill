@@ -1009,7 +1009,7 @@ namespace rpml
 		struct Config
 		{
 			int L = 16;
-			int T = std::pow( 2, 20 );
+			int T = std::pow( 2, 15 );
 			int F = 2;
 			int Nmin = 16;
 			int Nmax = 7500;
@@ -1588,7 +1588,7 @@ namespace rpml
 		{
 			std::unique_ptr<Rng> rng = std::unique_ptr<Rng>( new StandardRng() );
 			
-			float learningRate = 0.1f;
+			float learningRate = 5.0f;
 			InitializationType initializerType = InitializationType::He;
 			int input = 3; /* xyz */
 			int output = 0;
@@ -1628,9 +1628,9 @@ namespace rpml
 				layer->initialize( initializerType, rng.get() );
 				m_densityLayers.emplace_back( std::move( layer ) );
 
-				std::unique_ptr<Layer> activation = createActivation( output );
-				activation->initialize( initializerType, rng.get() );
-				m_densityLayers.emplace_back( std::move( activation ) );
+				//std::unique_ptr<Layer> activation = createActivation( output );
+				//activation->initialize( initializerType, rng.get() );
+				//m_densityLayers.emplace_back( std::move( activation ) );
 				input = output;
 			}
 
@@ -1655,6 +1655,15 @@ namespace rpml
 					m_colorLayers.emplace_back( std::move( activation ) );
 				}
 			}
+		}
+
+		float densityActivation(float x)
+		{
+			return std::exp( x );
+		}
+		float densityActivationDrivative( float x )
+		{
+			return std::exp( clampss( x, -15.0f, 15.0f) );
 		}
 
 		float train( const NeRFInput* inputs, const NeRFOutput* outputs, int nElement )
@@ -1766,23 +1775,27 @@ namespace rpml
 			{
 				float oColor[3] = {};
 				float T = 1.0f;
+				
+				// printf( "[%d] pts %d\n", i, marchings[i].end - marchings[i].beg );
 				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
 				{
-					float sigma = densityMat( 0, j );
+					float sigma = densityActivation( densityMat( 0, j ) );
+
 					float c[3];
 					for(int k = 0 ; k < 3 ; k++ )
 					{
 						c[k] = inputMat( k, j );
 					}
-					// printf( "%.15f %.5f\n", sigma, c[0] );
 					float a = 1.0f - std::exp( -sigma * dt );
 					for( int k = 0; k < 3; k++ )
 					{
 						oColor[k] += T * a * c[k];
 					}
+					// printf( "%d %.5f %.5f %.5f\n", j - marchings[i].beg, oColor[0], oColor[1], oColor[2] );
+
 					T *= ( 1.0f - a );
 				}
-				// printf( "%.5f %.5f %.5f\n", oColor[0], oColor[1], oColor[2] );
+				// printf( " %.5f %.5f %.5f\n", oColor[0], oColor[1], oColor[2] );
 
 				float dColor[3];
 				for( int k = 0; k < 3; k++ )
@@ -1791,13 +1804,13 @@ namespace rpml
 					// dColor[k] = outputs[i].color[k] - oColor[k];
 
 					loss += dColor[k] * dColor[k];
-					// printf( "d %.5f\n", dColor[k] );
+					// printf( " %.5f %.5f\n", oColor[k], outputs[i].color[k] );
 				}
 				
 				float oColor2[3] = {};
 				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
 				{
-					float sigma = densityMat( 0, j );
+					float sigma = densityActivation( densityMat( 0, j ) );
 					float c[3];
 					for( int k = 0; k < 3; k++ )
 					{
@@ -1809,6 +1822,7 @@ namespace rpml
 						float coef = T * a;
 						oColor2[k] += coef * c[k];
 						dL_dC( k, j ) = coef * dColor[k];
+						// printf( "coef * dColor[k] %f\n", coef * dColor[k] );
 					}
 					T *= ( 1.0f - a );
 
@@ -1821,9 +1835,10 @@ namespace rpml
 					float dSigma = 0.0f;
 					for( int k = 0; k < 3; k++ )
 					{
-						dSigma += ( T * sigma * c[k] - sigma * S[k] ) * dColor[k];
+						dSigma += ( T * dt * c[k] - dt * S[k] ) * dColor[k];
 					}
-					dL_dSigma( 0, j ) = dSigma;
+					dL_dSigma( 0, j ) = densityActivationDrivative( sigma ) * dSigma;
+					// printf( "dSigma %f\n", dSigma );
 				}
 			}
 
@@ -1979,7 +1994,7 @@ namespace rpml
 				float T = 1.0f;
 				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
 				{
-					float sigma = densityMat( 0, j );
+					float sigma = densityActivation( densityMat( 0, j ) );
 					float c[3];
 					for( int k = 0; k < 3; k++ )
 					{

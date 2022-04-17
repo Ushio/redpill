@@ -141,7 +141,7 @@ int main()
 	//	camera.fovy = nc.fovy;
 	//}
 
-	int _stride = 4;
+	int _stride = 8;
 
 	while( pr::NextFrame() == false )
 	{
@@ -201,8 +201,8 @@ int main()
 				{
 					glm::vec3 ro;
 					glm::vec3 rd;
-					int x = rng.drawUInt() % imageWidth;
-					int y = rng.drawUInt() % imageHeight;
+					int x = rng.drawUInt() % 800;
+					int y = rng.drawUInt() % 800;
 					raygen.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
 					rd = glm::normalize( rd );
 
@@ -228,11 +228,13 @@ int main()
 						output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
 						output.color[1] = std::pow( (float)color.y / 255.0f, 2.2f );
 						output.color[2] = std::pow( (float)color.z / 255.0f, 2.2f );
+
+						// printf( "%f %f %f\n", output.color[0], output.color[1], output.color[2] );
 						refs.push_back( output );
 					}
 				}
 			}
-		
+			printf( "input: %d\n", inputs.size() );
 			loss = nerf.train( inputs.data(), refs.data(), inputs.size() );
 			printf( "loss %f\n", loss / inputs.size() );
 		}
@@ -252,6 +254,7 @@ int main()
 			{
 				glm::vec3 ro, rd;
 				rayGenerator.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
+				rd = glm::normalize( rd );
 
 				glm::vec3 one_over_rd = safe_inv_rd( rd );
 				glm::vec3 input_ro = ro * 0.5f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
@@ -272,14 +275,14 @@ int main()
 				}
 				else
 				{
-					NeRFInput input;
-					input.ro[0] = 10;
-					input.ro[1] = 10;
-					input.ro[2] = 10;
-					input.rd[0] = 1;
-					input.rd[1] = 0;
-					input.rd[2] = 0;
-					nerf_in.push_back( input );
+					//NeRFInput input;
+					//input.ro[0] = 10;
+					//input.ro[1] = 10;
+					//input.ro[2] = 10;
+					//input.rd[0] = 1;
+					//input.rd[1] = 0;
+					//input.rd[2] = 0;
+					//nerf_in.push_back( input );
 				}
 			}
 		}
@@ -287,20 +290,50 @@ int main()
 		nerf_out.resize( nerf_in.size() );
 		nerf.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
 
+		int it = 0;
 		for( int y = 0; y < image.height(); ++y )
 		{
 			for( int x = 0; x < image.width(); ++x )
 			{
-				NeRFOutput o = nerf_out[y * image.height() + x];
-				float r = glm::clamp( pow( o.color[0], 0.454545f ) , 0.0f, 1.0f );
-				float g = glm::clamp( pow( o.color[1], 0.454545f ) , 0.0f, 1.0f );
-				float b = glm::clamp( pow( o.color[2], 0.454545f ) , 0.0f, 1.0f );
-				glm::u8vec4 color;
-				color.r = r * 255.0f;
-				color.g = g * 255.0f;
-				color.g = g * 255.0f;
-				color.a = 255;
-				image( x, y ) = color;
+				glm::vec3 ro, rd;
+				rayGenerator.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
+				rd = glm::normalize( rd );
+
+				glm::vec3 one_over_rd = safe_inv_rd( rd );
+				glm::vec3 input_ro = ro * 0.5f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+				glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
+
+				if( h.x /* min */ < h.y /* max */ )
+				{
+					NeRFOutput o = nerf_out[it++];
+					float r = glm::clamp( pow( o.color[0], 0.454545f ), 0.0f, 1.0f );
+					float g = glm::clamp( pow( o.color[1], 0.454545f ), 0.0f, 1.0f );
+					float b = glm::clamp( pow( o.color[2], 0.454545f ), 0.0f, 1.0f );
+					glm::u8vec4 color;
+					color.r = r * 255.0f;
+					color.g = g * 255.0f;
+					color.b = b * 255.0f;
+					color.a = 255;
+					image( x, y ) = color;
+
+					// printf( " %.5f %.5f %.5f\n", o.color[0], o.color[1], o.color[2] );
+				}
+				else
+				{
+					image( x, y ) = { 0, 0, 0, 255 };
+				}
+				// NeRFOutput o = nerf_out[y * image.height() + x];
+				// printf( " %.5f %.5f %.5f\n", o.color[0], o.color[1], o.color[2]);
+
+				//float r = glm::clamp( pow( o.color[0], 0.454545f ) , 0.0f, 1.0f );
+				//float g = glm::clamp( pow( o.color[1], 0.454545f ) , 0.0f, 1.0f );
+				//float b = glm::clamp( pow( o.color[2], 0.454545f ) , 0.0f, 1.0f );
+				//glm::u8vec4 color;
+				//color.r = r * 255.0f;
+				//color.g = g * 255.0f;
+				//color.b = b * 255.0f;
+				//color.a = 255;
+				//image( x, y ) = color;
 			}
 		}
 		bg->upload( image );
@@ -413,12 +446,12 @@ int main()
 
 		BeginImGui();
 
-		ImGui::SetNextWindowSize( { 600, 400 }, ImGuiCond_Once );
+		ImGui::SetNextWindowSize( { 600, 200 }, ImGuiCond_Once );
 		ImGui::Begin( "Panel" );
-		ImGui::InputFloat( "globalscale", &globalscale, 0.0001f );
-		ImGui::InputFloat( "globallocation.x", &globallocation.x, 0.001f );
-		ImGui::InputFloat( "globallocation.y", &globallocation.y, 0.001f );
-		ImGui::InputFloat( "globallocation.z", &globallocation.z, 0.001f );
+		//ImGui::InputFloat( "globalscale", &globalscale, 0.0001f );
+		//ImGui::InputFloat( "globallocation.x", &globallocation.x, 0.001f );
+		//ImGui::InputFloat( "globallocation.y", &globallocation.y, 0.001f );
+		//ImGui::InputFloat( "globallocation.z", &globallocation.z, 0.001f );
 
 		static int index = 0;
 		if( ImGui::InputInt( "index", &index ) )
