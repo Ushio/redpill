@@ -1009,7 +1009,7 @@ namespace rpml
 		struct Config
 		{
 			int L = 16;
-			int T = std::pow( 2, 15 );
+			int T = std::pow( 2, 18 );
 			int F = 2;
 			int Nmin = 16;
 			int Nmax = 7500;
@@ -1659,10 +1659,12 @@ namespace rpml
 
 		float densityActivation(float x)
 		{
+			return x;
 			return std::exp( x );
 		}
 		float densityActivationDrivative( float x )
 		{
+			return 1;
 			return std::exp( clampss( x, -15.0f, 15.0f) );
 		}
 

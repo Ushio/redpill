@@ -3,7 +3,7 @@
 #include <memory>
 #include <fstream>
 
-//#define RPML_DISABLE_ASSERT
+#define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
 using namespace rpml;
 
@@ -169,6 +169,8 @@ int main()
 		static std::vector<NeRFOutput> refs;
 		static StandardRng rng;
 
+		float scale = 0.5f;
+
 		for(int k = 0 ; k < 1 ; ++k)
 		{
 			inputs.clear();
@@ -207,7 +209,7 @@ int main()
 					rd = glm::normalize( rd );
 
 					glm::vec3 one_over_rd = safe_inv_rd( rd );
-					glm::vec3 input_ro = ro * 0.5f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+					glm::vec3 input_ro = ro * scale * 0.75f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
 					glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
 
 					if( h.x /* min */ < h.y /* max */ )
@@ -257,7 +259,7 @@ int main()
 				rd = glm::normalize( rd );
 
 				glm::vec3 one_over_rd = safe_inv_rd( rd );
-				glm::vec3 input_ro = ro * 0.5f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+				glm::vec3 input_ro = ro * scale + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
 				glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
 
 				if( h.x /* min */ < h.y /* max */ )
@@ -300,7 +302,7 @@ int main()
 				rd = glm::normalize( rd );
 
 				glm::vec3 one_over_rd = safe_inv_rd( rd );
-				glm::vec3 input_ro = ro * 0.5f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+				glm::vec3 input_ro = ro * scale + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
 				glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
 
 				if( h.x /* min */ < h.y /* max */ )
