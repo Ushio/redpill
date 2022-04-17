@@ -1009,7 +1009,7 @@ namespace rpml
 		struct Config
 		{
 			int L = 16;
-			int T = std::pow( 2, 18 );
+			int T = std::pow( 2, 19 );
 			int F = 2;
 			int Nmin = 16;
 			int Nmax = 7500;
@@ -1574,6 +1574,7 @@ namespace rpml
 		int beg;
 		int end;
 	};
+	static const float Teps = 0.0001f;
 
 	class NeRF
 	{
@@ -1583,6 +1584,7 @@ namespace rpml
 			MLP_DENSITY_OUT = 16,
 			MLP_WIDTH = 64,
 			MLP_STEP = 64,
+			//MLP_STEP = 512,
 		};
 		NeRF( ) : m_pool( std::thread::hardware_concurrency() )
 		{
@@ -1659,12 +1661,12 @@ namespace rpml
 
 		float densityActivation(float x)
 		{
-			return x;
+			// return x;
 			return std::exp( x );
 		}
 		float densityActivationDrivative( float x )
 		{
-			return 1;
+			// return 1;
 			return std::exp( clampss( x, -15.0f, 15.0f) );
 		}
 
@@ -1711,6 +1713,7 @@ namespace rpml
 				marchings.push_back( m );
 			}
 
+			printf( "points : %d\n", (int)points.size() / 3 );
 			Mat inputMat( points.size() / 3, 3 );
 			Mat outputMat;
 
@@ -1796,6 +1799,9 @@ namespace rpml
 					// printf( "%d %.5f %.5f %.5f\n", j - marchings[i].beg, oColor[0], oColor[1], oColor[2] );
 
 					T *= ( 1.0f - a );
+
+					if( T < Teps )
+						break;
 				}
 				// printf( " %.5f %.5f %.5f\n", oColor[0], oColor[1], oColor[2] );
 
@@ -1839,7 +1845,10 @@ namespace rpml
 					{
 						dSigma += ( T * dt * c[k] - dt * S[k] ) * dColor[k];
 					}
-					dL_dSigma( 0, j ) = densityActivationDrivative( sigma ) * dSigma;
+					dL_dSigma( 0, j ) = densityActivationDrivative( densityMat( 0, j ) ) * dSigma;
+
+					if( T < Teps )
+						break;
 					// printf( "dSigma %f\n", dSigma );
 				}
 			}
@@ -2008,6 +2017,9 @@ namespace rpml
 						oColor[k] += T * a * c[k];
 					}
 					T *= ( 1.0f - a );
+
+					if( T < Teps )
+						break;
 				}
 
 				for( int k = 0; k < 3; ++k )

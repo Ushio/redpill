@@ -93,8 +93,9 @@ int main()
 			nc.path = camera["file_path"].get<std::string>();
 
 			std::string file = JoinPath( GetDataPath( "nerf" ), nc.path ) + ".png";
-			nc.image.load( file.c_str() );
-
+			Result r = nc.image.load( file.c_str() );
+			PR_ASSERT( r == Result::Sucess, "" );
+			// printf( "%d %d\n", nc.image.width(), nc.image.height() );
 			cameras.push_back( nc );
 		}
 		
@@ -192,14 +193,15 @@ int main()
 				cam3d.origin = o;
 				cam3d.lookat = lookat;
 				cam3d.up = up;
+				cam3d.fovy = nc.fovy;
 				cam3d.zFar = 10;
-				cam3d.zNear = 0.001f;
+				cam3d.zNear = 0.05f;
 				cam3d.zUp = false;
 				glm::mat4 view, proj;
 				GetCameraMatrix( cam3d, &proj, &view );
 				CameraRayGenerator raygen( view, proj, 800, 800 );
 
-				for( int j = 0; j < 32; ++j )
+				for( int j = 0; j < 32 ; ++j )
 				{
 					glm::vec3 ro;
 					glm::vec3 rd;
@@ -236,7 +238,7 @@ int main()
 					}
 				}
 			}
-			printf( "input: %d\n", inputs.size() );
+			printf( "input: %d\n", (int)inputs.size() );
 			loss = nerf.train( inputs.data(), refs.data(), inputs.size() );
 			printf( "loss %f\n", loss / inputs.size() );
 		}
