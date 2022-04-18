@@ -1650,7 +1650,7 @@ namespace rpml
 				m_colorLayers.emplace_back( std::move( layer ) );
 
 				bool isLast = i + 1 == colorShape.size() - 1;
-				if( !isLast )
+				//if( !isLast ) need color activation
 				{
 					std::unique_ptr<Layer> activation = createActivation( output );
 					activation->initialize( initializerType, rng.get() );
@@ -1792,6 +1792,8 @@ namespace rpml
 						c[k] = inputMat( k, j );
 					}
 					float a = 1.0f - std::exp( -sigma * dt );
+					// printf( "a : %f\n", a );
+
 					for( int k = 0; k < 3; k++ )
 					{
 						oColor[k] += T * a * c[k];
@@ -1814,6 +1816,8 @@ namespace rpml
 					loss += dColor[k] * dColor[k];
 					// printf( " %.5f %.5f\n", oColor[k], outputs[i].color[k] );
 				}
+
+				T = 1.0f; // important!!!! 
 				
 				float oColor2[3] = {};
 				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
@@ -1849,7 +1853,7 @@ namespace rpml
 
 					if( T < Teps )
 						break;
-					// printf( "dSigma %f\n", dSigma );
+					// printf( "dSigma %.10f\n", dL_dSigma( 0, j ) );
 				}
 			}
 

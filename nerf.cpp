@@ -480,7 +480,18 @@ int main()
 
 			SetDataDir( ExecutableDir() );
 		}
-		
+		if( ImGui::Button( "stride = 16" ) )
+		{
+			_stride = 16;
+		}	
+		if( ImGui::Button( "stride = 8" ) )
+		{
+			_stride = 8;
+		}	
+		if( ImGui::Button( "stride = 1" ) )
+		{
+			_stride = 1;
+		}
 		if( ImGui::Button( "capture" ) )
 		{
 			Image2DRGBA8 img;
