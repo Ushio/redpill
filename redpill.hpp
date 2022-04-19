@@ -1012,16 +1012,16 @@ namespace rpml
 			int T = std::pow( 2, 19 );
 			int F = 2;
 			int Nmin = 16;
-			int Nmax = 7500;
-
-			float b() const
-			{
-				if( L <= 1 )
-				{
-					return 1.0f;
-				}
-				return std::exp( std::log( (float)Nmax / (float)Nmin ) / ( L - 1 ) );
-			}
+			float b = 1.38191f;
+			//int Nmax = 7500;
+			//float b() const
+			//{
+			//	if( L <= 1 )
+			//	{
+			//		return 1.0f;
+			//	}
+			//	return std::exp( std::log( (float)Nmax / (float)Nmin ) / ( L - 1 ) );
+			//}
 		};
 
 		enum
@@ -1083,7 +1083,7 @@ namespace rpml
 			}
 
 			const int dim = inputDimensions();
-			const float b = m_config.b();
+			const float b = m_config.b;
 
 			std::vector<uint32_t> hash_coordinate( 1 << dim );
 			std::vector<float> weights( 1 << dim );
@@ -1164,7 +1164,7 @@ namespace rpml
 			const Mat& value = context->var( "value" );
 
 			const int dim = inputDimensions();
-			const float b = m_config.b();
+			const float b = m_config.b;
 
 			std::vector<uint32_t> hash_coordinate( 1 << dim );
 			std::vector<float> weights( 1 << dim );
@@ -1639,7 +1639,8 @@ namespace rpml
 			// color network
 			input += 16; // dir SH encoding
 
-			std::vector<int> colorShape = { input, MLP_WIDTH, MLP_WIDTH, 3 };
+			// std::vector<int> colorShape = { input, MLP_WIDTH, MLP_WIDTH, 3 };
+			std::vector<int> colorShape = { input, MLP_WIDTH, 3 };
 			for( int i = 0; i < colorShape.size() - 1; i++ )
 			{
 				int input = colorShape[i];
@@ -1650,7 +1651,7 @@ namespace rpml
 				m_colorLayers.emplace_back( std::move( layer ) );
 
 				bool isLast = i + 1 == colorShape.size() - 1;
-				//if( !isLast ) need color activation
+				if( !isLast )
 				{
 					std::unique_ptr<Layer> activation = createActivation( output );
 					activation->initialize( initializerType, rng.get() );
@@ -1659,15 +1660,24 @@ namespace rpml
 			}
 		}
 
-		float densityActivation(float x)
+		inline float densityActivation(float x)
 		{
 			// return x;
 			return std::exp( x );
 		}
-		float densityActivationDrivative( float x )
+		inline float densityActivationDrivative( float x )
 		{
 			// return 1;
 			return std::exp( clampss( x, -15.0f, 15.0f) );
+		}
+		inline float rgbActivation( float x )
+		{
+			return 1.0f / ( 1.0f + std::exp( -x ) );
+		}
+		inline float rgbActivationDerivative( float x ) 
+		{
+			float y = rgbActivation( x );
+			return y * ( 1 - y );
 		}
 
 		float train( const NeRFInput* inputs, const NeRFOutput* outputs, int nElement )
@@ -1789,7 +1799,7 @@ namespace rpml
 					float c[3];
 					for(int k = 0 ; k < 3 ; k++ )
 					{
-						c[k] = inputMat( k, j );
+						c[k] = rgbActivation( inputMat( k, j ) );
 					}
 					float a = 1.0f - std::exp( -sigma * dt );
 					// printf( "a : %f\n", a );
@@ -1826,14 +1836,14 @@ namespace rpml
 					float c[3];
 					for( int k = 0; k < 3; k++ )
 					{
-						c[k] = inputMat( k, j );
+						c[k] = rgbActivation( inputMat( k, j ) );
 					}
 					float a = 1.0f - std::exp( -sigma * dt );
 					for( int k = 0; k < 3; k++ )
 					{
 						float coef = T * a;
 						oColor2[k] += coef * c[k];
-						dL_dC( k, j ) = coef * dColor[k];
+						dL_dC( k, j ) = rgbActivationDerivative( inputMat( k, j ) ) * coef * dColor[k];
 						// printf( "coef * dColor[k] %f\n", coef * dColor[k] );
 					}
 					T *= ( 1.0f - a );
@@ -2013,7 +2023,7 @@ namespace rpml
 					float c[3];
 					for( int k = 0; k < 3; k++ )
 					{
-						c[k] = inputMat( k, j );
+						c[k] = rgbActivation( inputMat( k, j ) );
 					}
 					float a = 1.0f - std::exp( -sigma * dt );
 					for( int k = 0; k < 3; k++ )
