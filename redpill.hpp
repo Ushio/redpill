@@ -1003,6 +1003,63 @@ namespace rpml
 		Config m_config;
 	};
 
+	constexpr uint32_t PRIMES[7] = { 438976903, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+	class DimensionHasher
+	{
+	public:
+		void add( uint32_t xs, int d )
+		{
+			RPML_ASSERT( d <= 7 );
+			m_h ^= xs * PRIMES[d];
+		}
+		uint32_t value() const { return m_h;  }
+	private:
+		uint32_t m_h = 0;
+	};
+	class HashGridEvaluator
+	{
+	public:
+		HashGridEvaluator( int dim ) : m_dim( dim ), m_bits( 0xFFFFFFFF )
+		{
+		}
+		bool moveNext()
+		{
+			m_bits++;
+			return m_bits < ( 1 << m_dim );
+		}
+		void evaluate( float* weight, uint32_t* hashValue, int resolution, float* input )
+		{
+			DimensionHasher hasher;
+			float w = 1.0f;
+			for( int d = 0; d < m_dim; ++d )
+			{
+				float x_in = input[d];
+
+				float xf = x_in * resolution;
+				uint32_t xi = xf;
+				float u = xf - xi;
+
+				RPML_ASSERT( 0.0f <= u && u <= 1.0f );
+
+				if( m_bits & ( 1 << d ) )
+				{
+					w *= u;
+					hasher.add( xi + 1, d );
+				}
+				else
+				{
+					w *= 1.0f - u;
+					hasher.add( xi, d );
+				}
+			}
+			*weight = w;
+			*hashValue = hasher.value();
+		}
+	private:
+		int m_dim;
+		uint32_t m_bits;
+	};
+
 	class MultiResolutionHashEncoder : public Layer
 	{
 	public:
@@ -1032,17 +1089,6 @@ namespace rpml
 		static int output( int input, const Config& config )
 		{
 			return config.L * config.F;
-		}
-		uint32_t hash_nd( const uint32_t* xis, int d )
-		{
-			RPML_ASSERT( d <= 7 );
-			const uint32_t primes[7] = { 438976903, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
-			uint32_t h = 0;
-			for( uint32_t i = 0; i < d; ++i )
-			{
-				h ^= xis[i] * primes[i];
-			}
-			return h;
 		}
 		MultiResolutionHashEncoder( int i, int o, const Config& config, float learningRate ) : Layer( i, o ), m_config( config )
 		{
@@ -1083,72 +1129,42 @@ namespace rpml
 			}
 
 			const int dim = inputDimensions();
-			const float b = m_config.b;
-
-			std::vector<uint32_t> hash_coordinate( 1 << dim );
-			std::vector<float> weights( 1 << dim );
-
-			std::vector<uint32_t> hash_inputs( dim );
 			std::vector<float> featureVector( m_config.F );
+			std::vector<float> hashInput( dim );
 
-			float resolution = m_config.Nmin;
 			for( int l = 0 ; l < m_config.L ; l++ )
 			{
-				float res = floor( resolution );
+				float res = floor( m_config.Nmin * std::pow( m_config.b, l ) );
 				
-				// go to next resolution
-				resolution *= b;
-
 				for( int row = 0; row < value.row() ; row++ )
 				{
-					// get hash_inputs and its hash_coordinate
-					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
-					{
-						float w = 1.0f;
-						for( int d = 0; d < dim; ++d )
-						{
-							float x_in = value( d, row );
-
-							float xf = x_in * res;
-							uint32_t xi = xf;
-							float u = xf - xi;
-
-							RPML_ASSERT( 0.0f <= u && u <= 1.0f );
-
-							if( bits & ( 1 << d ) )
-							{
-								w *= u;
-								hash_inputs[d] = xi + 1;
-							}
-							else
-							{
-								w *= 1.0f - u;
-								hash_inputs[d] = xi;
-							}
-						}
-						weights[bits] = w;
-						hash_coordinate[bits] = hash_nd( hash_inputs.data(), dim );
-					}
-
 #if !defined( RPML_DISABLE_ASSERT )
 					float sw = 0.0f;
-					for( auto w : weights )
-					{
-						sw += w;
-					}
-					RPML_ASSERT( fabs( sw - 1.0f ) < 0.001f );
 #endif
-					// linear interpolate
 					std::fill( featureVector.begin(), featureVector.end(), 0.0f );
-					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
+
+					HashGridEvaluator evaluator( dim );
+					while( evaluator.moveNext() )
 					{
-						float w = weights[bits];
-						uint32_t index = hash_coordinate[bits] % m_config.T;
-						for( int fdim = 0 ; fdim < m_config.F ; fdim++ )
+						float w;
+						uint32_t h;
+						for( int d = 0; d < dim; d++ )
+						{
+							hashInput[d] = value( d, row );
+						}
+						evaluator.evaluate( &w, &h, res, hashInput.data() );
+
+						uint32_t index = h % m_config.T;
+						for( int fdim = 0; fdim < m_config.F; fdim++ )
 						{
 							featureVector[fdim] += w * m_features[l]( fdim, index );
 						}
+
+#if !defined( RPML_DISABLE_ASSERT )
+						sw += w;
+#endif
 					}
+					RPML_ASSERT( fabs( sw - 1.0f ) < 0.001f );
 
 					// store feature vector
 					for( int fdim = 0; fdim < m_config.F; fdim++ )
@@ -1166,62 +1182,30 @@ namespace rpml
 			const int dim = inputDimensions();
 			const float b = m_config.b;
 
-			std::vector<uint32_t> hash_coordinate( 1 << dim );
-			std::vector<float> weights( 1 << dim );
-
-			std::vector<uint32_t> hash_inputs( dim );
+			std::vector<float> hashInput( dim );
 			std::vector<float> dfeatureVector( dim );
 			std::vector<int> drowIndices[NIndexBuckets];
 
-			float resolution = m_config.Nmin;
-			for( int l = 0; l < m_config.L; l++ )
+			for( int l = 0 ; l < m_config.L ; l++ )
 			{
-				float res = floor( resolution );
-				resolution *= b; // go to next resolution
+				float res = floor( m_config.Nmin * std::pow( m_config.b, l ) );
 
 				for( int row = 0; row < value.row(); row++ )
 				{
-					// get hash_inputs and its hash_coordinate
-					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
-					{
-						float w = 1.0f;
-						for( int d = 0; d < dim; ++d )
-						{
-							float x_in = value( d, row );
-
-							float xf = x_in * res;
-							uint32_t xi = xf;
-							float u = xf - xi;
-
-							if( bits & ( 1 << d ) )
-							{
-								w *= u;
-								hash_inputs[d] = xi + 1;
-							}
-							else
-							{
-								w *= 1.0f - u;
-								hash_inputs[d] = xi;
-							}
-						}
-						weights[bits] = w;
-						hash_coordinate[bits] = hash_nd( hash_inputs.data(), dim );
-					}
-
-#if !defined( RPML_DISABLE_ASSERT )
-					float sw = 0.0f;
-					for( auto w : weights )
-					{
-						sw += w;
-					}
-					RPML_ASSERT( fabs( sw - 1.0f ) < 0.001f );
-#endif
-					// accumulate derivative
 					Mat& dfeature = m_dfeatures[l];
-					for( uint32_t bits = 0; bits < ( 1 << dim ); bits++ )
+					HashGridEvaluator evaluator( dim );
+					while( evaluator.moveNext() )
 					{
-						float w = weights[bits];
-						uint32_t index = hash_coordinate[bits] % m_config.T;
+						float w;
+						uint32_t h;
+						for( int d = 0; d < dim; d++ )
+						{
+							hashInput[d] = value( d, row );
+						}
+						evaluator.evaluate( &w, &h, res, hashInput.data() );
+
+						uint32_t index = h % m_config.T;
+
 						bool touch = false;
 						for( int fdim = 0; fdim < m_config.F; fdim++ )
 						{
@@ -1232,7 +1216,6 @@ namespace rpml
 								touch = true;
 							}
 						}
-						
 						if( touch )
 						{
 							int bIndex = index / ( m_config.T / NIndexBuckets );
