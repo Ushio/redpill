@@ -1267,6 +1267,7 @@ namespace rpml
 			}
 			
 			int dim = m_inputs.size() / nElement;
+			printf( "%d\n", dim );
 			pr::TaskGroup g;
 			g.addElements( nElement );
 			pool->enqueueFor( nElement, 2, [&g, dim, nElement, this]( uint64_t beg, uint64_t end ) 
@@ -1606,7 +1607,7 @@ namespace rpml
 		{
 			std::unique_ptr<Rng> rng = std::unique_ptr<Rng>( new StandardRng() );
 			
-			float learningRate = 5.0f;
+			float learningRate = 256.0f;
 			InitializationType initializerType = InitializationType::He;
 			int input = 3; /* xyz */
 			int output = 0;
@@ -1740,6 +1741,7 @@ namespace rpml
 			}
 
 			printf( "points : %d\n", (int)points.size() / 3 );
+			int nEvaluation = points.size() / 3;
 			Mat inputMat( points.size() / 3, 3 );
 			Mat outputMat;
 
@@ -1889,7 +1891,7 @@ namespace rpml
 			{
 				RPML_ASSERT( inputMat.col() == m_colorLayers[i]->outputDimensions() );
 				m_colorLayers[i]->backward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
-				m_colorLayers[i]->optimize( nElement, &m_pool );
+				m_colorLayers[i]->optimize( nEvaluation, &m_pool );
 
 				if( i != 0 )
 				{
@@ -1914,7 +1916,7 @@ namespace rpml
 			{
 				RPML_ASSERT( inputMat.col() == m_densityLayers[i]->outputDimensions() );
 				m_densityLayers[i]->backward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
-				m_densityLayers[i]->optimize( nElement, &m_pool );
+				m_densityLayers[i]->optimize( nEvaluation, &m_pool );
 
 				if( i != 0 )
 				{
