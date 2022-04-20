@@ -491,6 +491,10 @@ namespace rpml
 			curVal = as_float( orig );
 		};
 	}
+	inline float atomicExchange( float* p, float v )
+	{
+		return as_float( InterlockedExchange( (LONG*)p, v ) );
+	}
 
 	class Optimizer
 	{
@@ -559,28 +563,21 @@ namespace rpml
 			m_beta2t *= m_beta2;
 		}
 		// gradient will be cleared.
-		void optimizeHashGridRow( Mat* parameter, Mat* gradient, int nElement, int* indices, int nIndices )
+		void atomicOptimizeHashGridRow( Mat* parameter, Mat* gradient, int nElement, int iy )
 		{
 			float s = m_alpha / nElement;
-
-			for( int i = 0; i < nIndices; i++ )
+			for( int ix = 0; ix < ( *parameter ).col(); ix++ )
 			{
-				int iy = indices[i];
-				for( int ix = 0; ix < ( *parameter ).col(); ix++ )
+				float g = atomicExchange( &( *gradient )( ix, iy ), 0.0f );
+				if( g == 0.0f )
 				{
-					float g = ( *gradient )( ix, iy );
-					if( g == 0.0f )
-					{
-						continue;
-					}
-					( *gradient )( ix, iy ) = 0.0f;
-
-					float m = m_m( ix, iy ) = m_beta1 * m_m( ix, iy ) + ( 1.0f - m_beta1 ) * g;
-					float v = m_v( ix, iy ) = m_beta2 * m_v( ix, iy ) + ( 1.0f - m_beta2 ) * g * g;
-					float m_hat = m / ( 1.0f - m_beta1t );
-					float v_hat = v / ( 1.0f - m_beta2t );
-					( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - s * m_hat / ( std::sqrt( v_hat ) + m_e );
+					continue;
 				}
+				float m = m_m( ix, iy ) = m_beta1 * m_m( ix, iy ) + ( 1.0f - m_beta1 ) * g;
+				float v = m_v( ix, iy ) = m_beta2 * m_v( ix, iy ) + ( 1.0f - m_beta2 ) * g * g;
+				float m_hat = m / ( 1.0f - m_beta1t );
+				float v_hat = v / ( 1.0f - m_beta2t );
+				( *parameter )( ix, iy ) = ( *parameter )( ix, iy ) - s * m_hat / ( std::sqrt( v_hat ) + m_e );
 			}
 		}
 	private:
@@ -1059,6 +1056,40 @@ namespace rpml
 		int m_dim;
 		uint32_t m_bits;
 	};
+	class HashGridVisitor
+	{
+	public:
+		HashGridVisitor( int dim ) : m_dim( dim ), m_bits( 0xFFFFFFFF )
+		{
+		}
+		bool moveNext()
+		{
+			m_bits++;
+			return m_bits < ( 1 << m_dim );
+		}
+		uint32_t evaluate( int resolution, float* input )
+		{
+			DimensionHasher hasher;
+			for( int d = 0; d < m_dim; ++d )
+			{
+				float x_in = input[d];
+				float xf = x_in * resolution;
+				uint32_t xi = xf;
+				if( m_bits & ( 1 << d ) )
+				{
+					hasher.add( xi + 1, d );
+				}
+				else
+				{
+					hasher.add( xi, d );
+				}
+			}
+			return hasher.value();
+		}
+	private:
+		int m_dim;
+		uint32_t m_bits;
+	};
 
 	class MultiResolutionHashEncoder : public Layer
 	{
@@ -1095,7 +1126,6 @@ namespace rpml
 			m_features.resize( m_config.L );
 			m_dfeatures.resize( m_config.L );
 			m_optimizers.resize( m_config.L );
-			m_drowIndices.resize( m_config.L * NIndexBuckets );
 			for( int i = 0; i < m_config.L ; i++ )
 			{
 				m_features[i].setShape( m_config.T, m_config.F );
@@ -1142,16 +1172,15 @@ namespace rpml
 					float sw = 0.0f;
 #endif
 					std::fill( featureVector.begin(), featureVector.end(), 0.0f );
-
+					for( int d = 0; d < dim; d++ )
+					{
+						hashInput[d] = value( d, row );
+					}
 					HashGridEvaluator evaluator( dim );
 					while( evaluator.moveNext() )
 					{
 						float w;
 						uint32_t h;
-						for( int d = 0; d < dim; d++ )
-						{
-							hashInput[d] = value( d, row );
-						}
 						evaluator.evaluate( &w, &h, res, hashInput.data() );
 
 						uint32_t index = h % m_config.T;
@@ -1192,84 +1221,88 @@ namespace rpml
 
 				for( int row = 0; row < value.row(); row++ )
 				{
+					for( int d = 0; d < dim; d++ )
+					{
+						hashInput[d] = value( d, row );
+					}
 					Mat& dfeature = m_dfeatures[l];
 					HashGridEvaluator evaluator( dim );
 					while( evaluator.moveNext() )
 					{
 						float w;
 						uint32_t h;
-						for( int d = 0; d < dim; d++ )
-						{
-							hashInput[d] = value( d, row );
-						}
 						evaluator.evaluate( &w, &h, res, hashInput.data() );
 
 						uint32_t index = h % m_config.T;
 
-						bool touch = false;
+						//bool touch = false;
 						for( int fdim = 0; fdim < m_config.F; fdim++ )
 						{
 							float g = gradient( m_config.F * l + fdim, row ) * w;
 							if( g != 0.0f )
 							{
 								atomAdd( &dfeature( fdim, index ), g );
-								touch = true;
 							}
-						}
-						if( touch )
-						{
-							int bIndex = index / ( m_config.T / NIndexBuckets );
-							RPML_ASSERT( bIndex < NIndexBuckets );
-							drowIndices[bIndex].push_back( index );
 						}
 					}
 				}
+			}
 
-				std::lock_guard<std::mutex> lc( m_dIndicesMutex );
-				for( int bi = 0; bi < NIndexBuckets; ++bi )
+			std::lock_guard<std::mutex> lc( m_inputMutex );
+			m_inputs.reserve( m_inputs.size() + value.row() * value.col() );
+			for( int iy = 0; iy < value.row(); iy++ )
+			{
+				for( int ix = 0; ix < value.col(); ix++ )
 				{
-					int dIndex = l * NIndexBuckets + bi;
-					m_drowIndices[dIndex].reserve( m_drowIndices[dIndex].size() + drowIndices[bi].size() );
-					for( int index : drowIndices[bi] )
-					{
-						m_drowIndices[dIndex].push_back( index );
-					}
-					drowIndices[bi].clear();
+					m_inputs.push_back( value( ix, iy ) );
 				}
 			}
 		}
 		
 		virtual void optimize( int nElement, pr::ThreadPool* pool ) 
 		{
-			pr::TaskGroup g;
-			g.addElements( m_config.L * NIndexBuckets );
 			for( int l = 0; l < m_config.L; l++ )
 			{
-				int lIndex = l;
-				m_optimizers[lIndex]->incrementParametereHashGridRow();
-				for( int bi = 0; bi < NIndexBuckets ; bi++ )
-				{
-					int bIndex = bi;
-
-					pool->enqueueTask( [lIndex, bIndex, nElement, this, &g]() 
-					{ 
-	#if ENABLE_TRACE
-						pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
-						tr.label( "m_optimizers[index]" );
-	#endif
-						int indicesIndex = lIndex * NIndexBuckets + bIndex;
-						m_optimizers[lIndex]->optimizeHashGridRow( &m_features[lIndex], &m_dfeatures[lIndex], nElement, m_drowIndices[indicesIndex].data(), m_drowIndices[indicesIndex].size() );
-						m_drowIndices[indicesIndex].clear();
-
-						g.doneElements( 1 );
-					} );
-				}
-
+				m_optimizers[l]->incrementParametereHashGridRow();
 			}
+			
+			int dim = m_inputs.size() / nElement;
+			pr::TaskGroup g;
+			g.addElements( nElement );
+			pool->enqueueFor( nElement, 2, [&g, dim, nElement, this]( uint64_t beg, uint64_t end ) 
+			{
+#if ENABLE_TRACE
+				pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+				tr.label( "optimize task" );
+#endif
+				std::vector<float> hashInput( dim );
+				for( int l = 0; l < m_config.L; l++ )
+				{
+					float res = floor( m_config.Nmin * std::pow( m_config.b, l ) );
+
+					for( int iy = beg; iy < end; iy++ )
+					{
+						for( int d = 0; d < dim; d++ )
+						{
+							hashInput[d] = m_inputs[ iy * dim + d ];
+						}
+						HashGridVisitor visitor( dim );
+						while( visitor.moveNext() )
+						{
+							uint32_t h = visitor.evaluate( res, hashInput.data() );
+							uint32_t index = h % m_config.T;
+							m_optimizers[l]->atomicOptimizeHashGridRow( &m_features[l], &m_dfeatures[l], nElement, index );
+						}
+					}
+				}
+				g.doneElements( end - beg );
+			} );
+
 			while( !g.isFinished() )
 			{
 				pool->processTask();
 			}
+			m_inputs.clear();
 		}
 
 		Config m_config;
@@ -1278,8 +1311,8 @@ namespace rpml
 		std::vector<Mat> m_dfeatures;
 		std::vector<std::unique_ptr<OptimizerAdam>> m_optimizers;
 
-		std::mutex m_dIndicesMutex;
-		std::vector<std::vector<int>> m_drowIndices;
+		std::mutex m_inputMutex;
+		std::vector<float> m_inputs; // row major
 	};
 
 	class MLPConfig
