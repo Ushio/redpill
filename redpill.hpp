@@ -1000,7 +1000,8 @@ namespace rpml
 		Config m_config;
 	};
 
-	constexpr uint32_t PRIMES[7] = { 438976903, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+	// 438976903 PRIMES[0] = 1 is very good for perf?
+	constexpr uint32_t PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
 	class DimensionHasher
 	{
 	public:
