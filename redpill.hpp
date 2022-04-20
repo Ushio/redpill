@@ -1113,11 +1113,6 @@ namespace rpml
 			//}
 		};
 
-		enum
-		{
-			NIndexBuckets = 4
-		};
-
 		static int output( int input, const Config& config )
 		{
 			return config.L * config.F;
@@ -1214,7 +1209,6 @@ namespace rpml
 
 			std::vector<float> hashInput( dim );
 			std::vector<float> dfeatureVector( dim );
-			std::vector<int> drowIndices[NIndexBuckets];
 
 			for( int l = 0 ; l < m_config.L ; l++ )
 			{
@@ -1268,7 +1262,6 @@ namespace rpml
 			}
 			
 			int dim = m_inputs.size() / nElement;
-			printf( "%d\n", dim );
 			pr::TaskGroup g;
 			g.addElements( nElement );
 			pool->enqueueFor( nElement, 2, [&g, dim, nElement, this]( uint64_t beg, uint64_t end ) 
@@ -1680,12 +1673,10 @@ namespace rpml
 
 		inline float densityActivation(float x)
 		{
-			// return x;
 			return std::exp( x );
 		}
 		inline float densityActivationDrivative( float x )
 		{
-			// return 1;
 			return std::exp( clampss( x, -15.0f, 15.0f) );
 		}
 		inline float rgbActivation( float x )
@@ -1716,7 +1707,9 @@ namespace rpml
 				int nSteps = 0;
 				for( ; ; )
 				{
-					float t = dt * nSteps++;
+					static StandardRng rng;
+					float t = dt * ( nSteps + rng.draw() );
+					nSteps++;
 					float x = input.ro[0] + input.rd[0] * t;
 					float y = input.ro[1] + input.rd[1] * t;
 					float z = input.ro[2] + input.rd[2] * t;
@@ -1863,7 +1856,7 @@ namespace rpml
 						float coef = T * a;
 						oColor2[k] += coef * c[k];
 						dL_dC( k, j ) = rgbActivationDerivative( inputMat( k, j ) ) * coef * dColor[k];
-						// printf( "coef * dColor[k] %f\n", coef * dColor[k] );
+						// printf( "d = %f, a = %f, {%f %f %f} \n", sigma, a, coef * dColor[0], coef * dColor[1], coef * dColor[2] );
 					}
 					T *= ( 1.0f - a );
 
@@ -1880,9 +1873,29 @@ namespace rpml
 					}
 					dL_dSigma( 0, j ) = densityActivationDrivative( densityMat( 0, j ) ) * dSigma;
 
+					//{
+					//	T = 0.897398f;
+					//	c[0] = 0.511305;
+					//	c[1] = 0.487361;
+					//	c[2] = 0.506111;
+					//	S[0] = 0.487542;
+					//	S[1] = 0.465489;
+					//	S[2] = 0.495301;
+					//	dColor[0] = -0.121479;
+					//	dColor[1] = -0.119085;
+					//	dColor[2] = -0.174054;
+					//	float dSigma = 0.0f;
+					//	for( int k = 0; k < 3; k++ )
+					//	{
+					//		dSigma += ( T * dt * c[k] - dt * S[k] ) * dColor[k];
+					//	}
+					//	printf( "a %f\n ", densityActivationDrivative( densityMat( 0, j ) ) * dSigma );
+					//}
+
 					if( T < Teps )
 						break;
-					// printf( "dSigma %.10f\n", dL_dSigma( 0, j ) );
+
+					//printf( "dSigma  %f, T %f, c %f %f %f, s %f %f %f \n", dL_dSigma( 0, j ), T, c[0], c[1], c[2], S[0], S[1], S[2] );
 				}
 			}
 
