@@ -1656,8 +1656,8 @@ namespace rpml
 			// color network
 			input += 16; // dir SH encoding
 
-			// std::vector<int> colorShape = { input, MLP_WIDTH, MLP_WIDTH, 3 };
-			std::vector<int> colorShape = { input, MLP_WIDTH, 3 };
+			std::vector<int> colorShape = { input, MLP_WIDTH, MLP_WIDTH, 3 };
+			// std::vector<int> colorShape = { input, MLP_WIDTH, 3 };
 			for( int i = 0; i < colorShape.size() - 1; i++ )
 			{
 				int input = colorShape[i];
