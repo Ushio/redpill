@@ -1422,7 +1422,6 @@ namespace rpml
 			int nElement = x.row();
 
 			float loss = 0.0f;
-			std::mutex lmutex;
 
 			std::vector<std::atomic<int>> layerTasks( m_layers.size() );
 			std::fill( layerTasks.begin(), layerTasks.end(), 0 );
@@ -1457,10 +1456,7 @@ namespace rpml
 
 				// m: estimated result
 				float L = mse( inputMat, slicedY );
-				{
-					std::lock_guard<std::mutex> lc( lmutex );
-					loss += L;
-				}
+				atomAdd( &loss, L );
 
 				// MSE backward is "x - y"
 				sub( &inputMat, slicedY );
