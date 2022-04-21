@@ -72,8 +72,10 @@ int main()
 	NeRF nerf;
 
 	std::vector<NerfCamera> cameras;
+
+	for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )
 	{
-		std::ifstream ifs( GetDataPath( "nerf/transforms_train.json" ) );
+		std::ifstream ifs( GetDataPath( filePath ) );
 		nlohmann::json j;
 		ifs >> j;
 
@@ -81,8 +83,8 @@ int main()
 		float fovy = camera_angle_x.get<float>();
 
 		nlohmann::json frames = j["frames"];
-		for( int i = 0; i < frames.size() ; i++ )
-		//for( int i = 0; i < 10; i++ )
+		for( int i = 0; i < frames.size(); i++ )
+		// for( int i = 0; i < 10; i++ )
 		{
 			nlohmann::json camera = frames[i];
 			glm::mat4 m = loadMatrix( camera["transform_matrix"] );
@@ -98,7 +100,6 @@ int main()
 			// printf( "%d %d\n", nc.image.width(), nc.image.height() );
 			cameras.push_back( nc );
 		}
-		
 	}
 
 	//std::string error;
@@ -194,14 +195,14 @@ int main()
 				cam3d.lookat = lookat;
 				cam3d.up = up;
 				cam3d.fovy = nc.fovy;
-				cam3d.zFar = 10;
-				cam3d.zNear = 0.05f;
+				cam3d.zFar = 4.0f;
+				cam3d.zNear = 0.1f;
 				cam3d.zUp = false;
 				glm::mat4 view, proj;
 				GetCameraMatrix( cam3d, &proj, &view );
 				CameraRayGenerator raygen( view, proj, 800, 800 );
 
-				for( int j = 0; j < 32 ; ++j )
+				for( int j = 0; j < 16 ; ++j )
 				{
 					glm::vec3 ro;
 					glm::vec3 rd;
@@ -326,18 +327,6 @@ int main()
 				{
 					image( x, y ) = { 0, 0, 0, 255 };
 				}
-				// NeRFOutput o = nerf_out[y * image.height() + x];
-				// printf( " %.5f %.5f %.5f\n", o.color[0], o.color[1], o.color[2]);
-
-				//float r = glm::clamp( pow( o.color[0], 0.454545f ) , 0.0f, 1.0f );
-				//float g = glm::clamp( pow( o.color[1], 0.454545f ) , 0.0f, 1.0f );
-				//float b = glm::clamp( pow( o.color[2], 0.454545f ) , 0.0f, 1.0f );
-				//glm::u8vec4 color;
-				//color.r = r * 255.0f;
-				//color.g = g * 255.0f;
-				//color.b = b * 255.0f;
-				//color.a = 255;
-				//image( x, y ) = color;
 			}
 		}
 		bg->upload( image );
@@ -381,54 +370,56 @@ int main()
 		//	SetObjectIdentify();
 		//} );
 
-		// for(int i = 0 ; i < cameras.size() ; i++) 
-		{
-			glm::vec3 o = { 0, 0, 0 };
-			glm::vec3 up = { 0, 1, 0 };
-			glm::vec3 lookat = { 0, 0, -1 };
+		//for(int i = 0 ; i < cameras.size() ; i++) 
+		//{
+		//	glm::vec3 o = { 0, 0, 0 };
+		//	glm::vec3 up = { 0, 1, 0 };
+		//	glm::vec3 lookat = { 0, 0, -1 };
 
-			// NerfCamera nc = cameras[i];
-			NerfCamera nc = cameras[0];
-			up = glm::mat3( glm::inverseTranspose( nc.transform ) ) * up;
-			o = nc.transform * glm::vec4( o, 1.0f );
-			lookat = nc.transform * glm::vec4( lookat, 1.0f );
+		//	NerfCamera nc = cameras[i];
+		//	// NerfCamera nc = cameras[0];
+		//	up = glm::mat3( glm::inverseTranspose( nc.transform ) ) * up;
+		//	o = nc.transform * glm::vec4( o, 1.0f );
+		//	lookat = nc.transform * glm::vec4( lookat, 1.0f );
 
-			Camera3D cam3d;
-			cam3d.origin = o;
-			cam3d.lookat = lookat;
-			cam3d.up = up;
-			cam3d.zFar = 10;
-			cam3d.zNear = 0.001f;
-			cam3d.zUp = false;
-			glm::mat4 view, proj;
-			GetCameraMatrix( cam3d, &proj, &view );
-			CameraRayGenerator raygen( view, proj, 800, 800 );
+		//	Camera3D cam3d;
+		//	cam3d.origin = o;
+		//	cam3d.lookat = lookat;
+		//	cam3d.up = up;
+		//	cam3d.zFar = 10.0f;
+		//	cam3d.zNear = 0.001f;
+		//	cam3d.fovy = nc.fovy;
+		//	cam3d.zUp = false;
+		//	glm::mat4 view, proj;
+		//	GetCameraMatrix( cam3d, &proj, &view );
+		//	CameraRayGenerator raygen( view, proj, 800, 800 );
 
-			glm::vec3 ro;
-			glm::vec3 rd;
-			raygen.shoot( &ro, &rd, 0, 0, 0.5f, 0.5f );
-			DrawLine( ro, ro + glm::normalize( rd ) * 10.0f, { 255, 255, 255 } );
-			raygen.shoot( &ro, &rd, 799, 0, 0.5f, 0.5f );
-			DrawLine( ro, ro + glm::normalize( rd ) * 10.0f, { 255, 255, 255 } );
-			raygen.shoot( &ro, &rd, 0, 799, 0.5f, 0.5f );
-			DrawLine( ro, ro + glm::normalize( rd ) * 10.0f, { 255, 255, 255 } );
-			raygen.shoot( &ro, &rd, 799, 799, 0.5f, 0.5f );
-			DrawLine( ro, ro + glm::normalize( rd ) * 10.0f, { 255, 255, 255 } );
+		//	float L = 0.1f;
+		//	glm::vec3 ro;
+		//	glm::vec3 rd;
+		//	raygen.shoot( &ro, &rd, 0, 0, 0.5f, 0.5f );
+		//	DrawLine( ro, ro + glm::normalize( rd ) * L, { 255, 255, 255 } );
+		//	raygen.shoot( &ro, &rd, 799, 0, 0.5f, 0.5f );
+		//	DrawLine( ro, ro + glm::normalize( rd ) * L, { 255, 255, 255 } );
+		//	raygen.shoot( &ro, &rd, 0, 799, 0.5f, 0.5f );
+		//	DrawLine( ro, ro + glm::normalize( rd ) * L, { 255, 255, 255 } );
+		//	raygen.shoot( &ro, &rd, 799, 799, 0.5f, 0.5f );
+		//	DrawLine( ro, ro + glm::normalize( rd ) * L, { 255, 255, 255 } );
 
-			DrawArrow( o, o + up * 0.1f, 0.005f, { 0, 255, 0 } );
+		//	DrawArrow( o, o + up * 0.1f, 0.005f, { 0, 255, 0 } );
 
 
-			raygen.shoot( &ro, &rd, 400, 400, 0.5f, 0.5f );
-			DrawLine( ro, ro + glm::normalize( rd ) * 10.0f, { 255, 0, 0 } );
+		//	//raygen.shoot( &ro, &rd, 400, 400, 0.5f, 0.5f );
+		//	//DrawLine( ro, ro + glm::normalize( rd ) * 10.0f, { 255, 0, 0 } );
 
-			rd = glm::normalize( rd );
-			glm::vec3 one_over_rd = safe_inv_rd( rd );
-			glm::vec3 localro = ro * 0.5f + glm::vec3( 0.5f, 0.5f, 0.5f );
-			glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, localro, one_over_rd );
+		//	//rd = glm::normalize( rd );
+		//	//glm::vec3 one_over_rd = safe_inv_rd( rd );
+		//	//glm::vec3 localro = ro * 0.5f + glm::vec3( 0.5f, 0.5f, 0.5f );
+		//	//glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, localro, one_over_rd );
 
-			DrawSphere( ro + glm::normalize( rd ) * h.x * 2.0f, 0.01f, { 0, 0, 255 } );
-			DrawSphere( ro + glm::normalize( rd ) * h.y * 2.0f, 0.01f, { 0, 0, 255 } );
-		}
+		//	//DrawSphere( ro + glm::normalize( rd ) * h.x * 2.0f, 0.01f, { 0, 0, 255 } );
+		//	//DrawSphere( ro + glm::normalize( rd ) * h.y * 2.0f, 0.01f, { 0, 0, 255 } );
+		//}
 
 		//{
 		//	glm::vec3 o = { 0, 0, 0 };
@@ -452,6 +443,8 @@ int main()
 
 		ImGui::SetNextWindowSize( { 600, 200 }, ImGuiCond_Once );
 		ImGui::Begin( "Panel" );
+		static int itr = 0;
+		ImGui::Text( "itr %d", itr++ );
 		//ImGui::InputFloat( "globalscale", &globalscale, 0.0001f );
 		//ImGui::InputFloat( "globallocation.x", &globallocation.x, 0.001f );
 		//ImGui::InputFloat( "globallocation.y", &globallocation.y, 0.001f );
@@ -488,6 +481,14 @@ int main()
 		{
 			_stride = 8;
 		}	
+		if( ImGui::Button( "stride = 4" ) )
+		{
+			_stride = 4;
+		}
+		if( ImGui::Button( "stride = 2" ) )
+		{
+			_stride = 2;
+		}
 		if( ImGui::Button( "stride = 1" ) )
 		{
 			_stride = 1;

@@ -1601,7 +1601,7 @@ namespace rpml
 		{
 			std::unique_ptr<Rng> rng = std::unique_ptr<Rng>( new StandardRng() );
 			
-			float learningRate = 256.0f;
+			float learningRate = 512.0f;
 			InitializationType initializerType = InitializationType::He;
 			int input = 3; /* xyz */
 			int output = 0;
@@ -1693,11 +1693,18 @@ namespace rpml
 		{
 			// unsigned int fp_control_state = _controlfp( _EM_INEXACT, _MCW_EM );
 
+			float loss = 0.0f;
+
+			std::vector<std::atomic<int>> densityLayerTasks( m_densityLayers.size() );
+			std::vector<std::atomic<int>> colorLayerTasks( m_colorLayers.size() );
+			std::fill( densityLayerTasks.begin(), densityLayerTasks.end(), 0 );
+			std::fill( colorLayerTasks.begin(), colorLayerTasks.end(), 0 );
+
 			std::vector<NeRFMarching> marchings;
 			std::vector<float> points;
 
 			const float dt = std::sqrt( 3.0f ) / MLP_STEP;
-			for( int i = 0; i < nElement ; i++ )
+			for( int64_t i = 0; i < nElement; i++ )
 			{
 				NeRFInput input = inputs[i];
 
@@ -1734,211 +1741,215 @@ namespace rpml
 				marchings.push_back( m );
 			}
 
-			printf( "points : %d\n", (int)points.size() / 3 );
-			int nEvaluation = points.size() / 3;
-			Mat inputMat( points.size() / 3, 3 );
-			Mat outputMat;
+			pr::TaskGroup g;
+			g.addElements( nElement );
+			m_pool.enqueueFor( nElement, 8, [&]( int64_t beg, int64_t end ) {
+				int mBegin = marchings[beg].beg;
+				int mEnd = marchings[end-1].end;
+				int nTasks = end - beg;
+				int nLocalEvaluation = mEnd - mBegin;
+				int nEvaluation = points.size() / 3;
 
-			for( int i = 0; i < points.size() / 3; i++ )
-			{
-				inputMat( 0, i ) = points[i * 3];
-				inputMat( 1, i ) = points[i * 3 + 1];
-				inputMat( 2, i ) = points[i * 3 + 2];
-			}
+				Mat inputMat( nLocalEvaluation, 3 );
+				Mat outputMat;
 
-			LocalStorage densityStorage;
-			LocalStorage colorStorage;
-			densityStorage.layerContexts.resize( m_densityLayers.size() );
-			colorStorage.layerContexts.resize( m_colorLayers.size() );
-
-			for( int i = 0; i < m_densityLayers.size(); i++ )
-			{
-				RPML_ASSERT( inputMat.col() == m_densityLayers[i]->inputDimensions() );
-				m_densityLayers[i]->forward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
-				RPML_ASSERT( outputMat.col() == m_densityLayers[i]->outputDimensions() );
-				inputMat.swap( outputMat );
-			}
-
-			Mat densityMat = inputMat;
-
-			// combine dir
-			Mat combinedMat( densityMat.row(), densityMat.col() + 16 );
-			for( int i = 0; i < nElement; i++ )
-			{
-				NeRFInput input = inputs[i];
-				float sh_encode[16] = {};
-				sh_L4( sh_encode, input.rd[0], input.rd[1], input.rd[2] );
-
-				for( int j = marchings[i].beg; j < marchings[i].end ; j++ )
+				for( int i = mBegin; i < mEnd; i++ )
 				{
-					// original 
-					for( int k = 0; k < MLP_DENSITY_OUT; ++k )
-					{
-						combinedMat( k, j ) = densityMat( k, j );
-					}
+					int localI = i - mBegin;
+					inputMat( 0, localI ) = points[i * 3];
+					inputMat( 1, localI ) = points[i * 3 + 1];
+					inputMat( 2, localI ) = points[i * 3 + 2];
+				}
 
-					// dir
-					for(int k = 0 ; k < 16 ; ++k)
+				LocalStorage densityStorage;
+				LocalStorage colorStorage;
+				densityStorage.layerContexts.resize( m_densityLayers.size() );
+				colorStorage.layerContexts.resize( m_colorLayers.size() );
+
+				for( int i = 0; i < m_densityLayers.size(); i++ )
+				{
+					RPML_ASSERT( inputMat.col() == m_densityLayers[i]->inputDimensions() );
+					m_densityLayers[i]->forward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
+					RPML_ASSERT( outputMat.col() == m_densityLayers[i]->outputDimensions() );
+					inputMat.swap( outputMat );
+				}
+
+				Mat densityMat = inputMat;
+
+				// combine dir
+				Mat combinedMat( densityMat.row(), densityMat.col() + 16 );
+				for( int i = beg; i < end; i++ )
+				{
+					NeRFInput input = inputs[i];
+					float sh_encode[16] = {};
+					sh_L4( sh_encode, input.rd[0], input.rd[1], input.rd[2] );
+
+					for( int j = marchings[i].beg; j < marchings[i].end ; j++ )
 					{
-						combinedMat( MLP_DENSITY_OUT + k, j ) = sh_encode[k];
+						int localJ = j - mBegin;
+
+						// original 
+						for( int k = 0; k < MLP_DENSITY_OUT; ++k )
+						{
+							combinedMat( k, localJ ) = densityMat( k, localJ );
+						}
+						// dir
+						for( int k = 0 ; k < 16 ; ++k )
+						{
+							combinedMat( MLP_DENSITY_OUT + k, localJ ) = sh_encode[k];
+						}
 					}
 				}
-			}
-			inputMat.swap( combinedMat );
+				inputMat.swap( combinedMat );
 
-			for( int i = 0; i < m_colorLayers.size(); i++ )
-			{
-				RPML_ASSERT( inputMat.col() == m_colorLayers[i]->inputDimensions() );
-				m_colorLayers[i]->forward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
-				RPML_ASSERT( outputMat.col() == m_colorLayers[i]->outputDimensions() );
-				inputMat.swap( outputMat );
-			}
+				for( int i = 0; i < m_colorLayers.size(); i++ )
+				{
+					RPML_ASSERT( inputMat.col() == m_colorLayers[i]->inputDimensions() );
+					m_colorLayers[i]->forward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
+					RPML_ASSERT( outputMat.col() == m_colorLayers[i]->outputDimensions() );
+					inputMat.swap( outputMat );
+				}
 			
-			float loss = 0.0f;
-
-			Mat dL_dC( inputMat.row(), inputMat.col() );
-			Mat dL_dSigma( inputMat.row(), 1 );
-			for( int i = 0; i < nElement; i++ )
-			{
-				float oColor[3] = {};
-				float T = 1.0f;
+				Mat dL_dC( inputMat.row(), inputMat.col() );
+				Mat dL_dSigma( inputMat.row(), 1 );
+				for( int i = beg; i < end; i++ )
+				{
+					float oColor[3] = {};
+					float T = 1.0f;
 				
-				// printf( "[%d] pts %d\n", i, marchings[i].end - marchings[i].beg );
-				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
-				{
-					float sigma = densityActivation( densityMat( 0, j ) );
-
-					float c[3];
-					for(int k = 0 ; k < 3 ; k++ )
+					// printf( "[%d] pts %d\n", i, marchings[i].end - marchings[i].beg );
+					for( int j = marchings[i].beg; j < marchings[i].end; j++ )
 					{
-						c[k] = rgbActivation( inputMat( k, j ) );
-					}
-					float a = 1.0f - std::exp( -sigma * dt );
-					// printf( "a : %f\n", a );
+						int localJ = j - mBegin;
+						float sigma = densityActivation( densityMat( 0, localJ ) );
 
+						float c[3];
+						for(int k = 0 ; k < 3 ; k++ )
+						{
+							c[k] = rgbActivation( inputMat( k, localJ ) );
+						}
+						float a = 1.0f - std::exp( -sigma * dt );
+						// printf( "a : %f\n", a );
+
+						for( int k = 0; k < 3; k++ )
+						{
+							oColor[k] += T * a * c[k];
+						}
+						// printf( "%d %.5f %.5f %.5f\n", j - marchings[i].beg, oColor[0], oColor[1], oColor[2] );
+
+						T *= ( 1.0f - a );
+
+						if( T < Teps )
+							break;
+					}
+					// printf( " %.5f %.5f %.5f\n", oColor[0], oColor[1], oColor[2] );
+
+					float dColor[3];
 					for( int k = 0; k < 3; k++ )
 					{
-						oColor[k] += T * a * c[k];
+						dColor[k] = oColor[k] - outputs[i].color[k];
+						// dColor[k] = outputs[i].color[k] - oColor[k];
+
+						atomAdd( &loss, dColor[k] * dColor[k] );
+						// printf( " %.5f %.5f\n", oColor[k], outputs[i].color[k] );
 					}
-					// printf( "%d %.5f %.5f %.5f\n", j - marchings[i].beg, oColor[0], oColor[1], oColor[2] );
 
-					T *= ( 1.0f - a );
-
-					if( T < Teps )
-						break;
-				}
-				// printf( " %.5f %.5f %.5f\n", oColor[0], oColor[1], oColor[2] );
-
-				float dColor[3];
-				for( int k = 0; k < 3; k++ )
-				{
-					dColor[k] = oColor[k] - outputs[i].color[k];
-					// dColor[k] = outputs[i].color[k] - oColor[k];
-
-					loss += dColor[k] * dColor[k];
-					// printf( " %.5f %.5f\n", oColor[k], outputs[i].color[k] );
-				}
-
-				T = 1.0f; // important!!!! 
+					T = 1.0f; // important!!!! 
 				
-				float oColor2[3] = {};
-				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
-				{
-					float sigma = densityActivation( densityMat( 0, j ) );
-					float c[3];
-					for( int k = 0; k < 3; k++ )
+					float oColor2[3] = {};
+					for( int j = marchings[i].beg; j < marchings[i].end; j++ )
 					{
-						c[k] = rgbActivation( inputMat( k, j ) );
+						int localJ = j - mBegin;
+						float sigma = densityActivation( densityMat( 0, localJ ) );
+						float c[3];
+						for( int k = 0; k < 3; k++ )
+						{
+							c[k] = rgbActivation( inputMat( k, localJ ) );
+						}
+						float a = 1.0f - std::exp( -sigma * dt );
+						for( int k = 0; k < 3; k++ )
+						{
+							float coef = T * a;
+							oColor2[k] += coef * c[k];
+							dL_dC( k, localJ ) = rgbActivationDerivative( inputMat( k, localJ ) ) * coef * dColor[k];
+							// printf( "d = %f, a = %f, {%f %f %f} \n", sigma, a, coef * dColor[0], coef * dColor[1], coef * dColor[2] );
+						}
+						T *= ( 1.0f - a );
+
+						float S[3]; 
+						for( int k = 0; k < 3; k++ )
+						{
+							S[k] = oColor[k] - oColor2[k];
+						}
+
+						float dSigma = 0.0f;
+						for( int k = 0; k < 3; k++ )
+						{
+							dSigma += ( T * dt * c[k] - dt * S[k] ) * dColor[k];
+						}
+						dL_dSigma( 0, localJ ) = densityActivationDrivative( densityMat( 0, localJ ) ) * dSigma;
+
+						if( T < Teps )
+							break;
+
+						//printf( "dSigma  %f, T %f, c %f %f %f, s %f %f %f \n", dL_dSigma( 0, j ), T, c[0], c[1], c[2], S[0], S[1], S[2] );
 					}
-					float a = 1.0f - std::exp( -sigma * dt );
-					for( int k = 0; k < 3; k++ )
-					{
-						float coef = T * a;
-						oColor2[k] += coef * c[k];
-						dL_dC( k, j ) = rgbActivationDerivative( inputMat( k, j ) ) * coef * dColor[k];
-						// printf( "d = %f, a = %f, {%f %f %f} \n", sigma, a, coef * dColor[0], coef * dColor[1], coef * dColor[2] );
-					}
-					T *= ( 1.0f - a );
-
-					float S[3]; 
-					for( int k = 0; k < 3; k++ )
-					{
-						S[k] = oColor[k] - oColor2[k];
-					}
-
-					float dSigma = 0.0f;
-					for( int k = 0; k < 3; k++ )
-					{
-						dSigma += ( T * dt * c[k] - dt * S[k] ) * dColor[k];
-					}
-					dL_dSigma( 0, j ) = densityActivationDrivative( densityMat( 0, j ) ) * dSigma;
-
-					//{
-					//	T = 0.897398f;
-					//	c[0] = 0.511305;
-					//	c[1] = 0.487361;
-					//	c[2] = 0.506111;
-					//	S[0] = 0.487542;
-					//	S[1] = 0.465489;
-					//	S[2] = 0.495301;
-					//	dColor[0] = -0.121479;
-					//	dColor[1] = -0.119085;
-					//	dColor[2] = -0.174054;
-					//	float dSigma = 0.0f;
-					//	for( int k = 0; k < 3; k++ )
-					//	{
-					//		dSigma += ( T * dt * c[k] - dt * S[k] ) * dColor[k];
-					//	}
-					//	printf( "a %f\n ", densityActivationDrivative( densityMat( 0, j ) ) * dSigma );
-					//}
-
-					if( T < Teps )
-						break;
-
-					//printf( "dSigma  %f, T %f, c %f %f %f, s %f %f %f \n", dL_dSigma( 0, j ), T, c[0], c[1], c[2], S[0], S[1], S[2] );
 				}
-			}
 
-			// backward
-			inputMat = dL_dC;
-			for( int i = (int)m_colorLayers.size() - 1; 0 <= i; i-- )
+				// backward
+				inputMat = dL_dC;
+				for( int i = (int)m_colorLayers.size() - 1; 0 <= i; i-- )
+				{
+					RPML_ASSERT( inputMat.col() == m_colorLayers[i]->outputDimensions() );
+					m_colorLayers[i]->backward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
+
+					if( colorLayerTasks[i].fetch_add( nTasks ) + nTasks == nElement )
+					{
+						m_colorLayers[i]->optimize( nEvaluation, &m_pool );
+					}
+
+					if( i != 0 )
+					{
+						RPML_ASSERT( outputMat.col() == m_colorLayers[i]->inputDimensions() );
+					}
+					inputMat.swap( outputMat );
+				}
+
+				Mat densityBackwardInput( densityMat.row(), densityMat.col() );
+				for( int iy = 0; iy < densityMat.row(); iy++ )
+				{
+					for( int ix = 0; ix < densityMat.col(); ix++ )
+					{
+						densityBackwardInput( ix, iy ) = inputMat( ix, iy );
+					}
+					densityBackwardInput( 0, iy ) += dL_dSigma( 0, iy );
+				}
+
+				inputMat = densityBackwardInput;
+
+				for( int i = (int)m_densityLayers.size() - 1; 0 <= i; i-- )
+				{
+					RPML_ASSERT( inputMat.col() == m_densityLayers[i]->outputDimensions() );
+					m_densityLayers[i]->backward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
+
+					if( densityLayerTasks[i].fetch_add( nTasks ) + nTasks == nElement )
+					{
+						m_densityLayers[i]->optimize( nEvaluation, &m_pool );
+					}
+
+					if( i != 0 )
+					{
+						RPML_ASSERT( outputMat.col() == m_densityLayers[i]->inputDimensions() );
+					}
+					inputMat.swap( outputMat );
+				}
+
+				g.doneElements( end - beg );
+			} );
+			while( !g.isFinished() )
 			{
-				RPML_ASSERT( inputMat.col() == m_colorLayers[i]->outputDimensions() );
-				m_colorLayers[i]->backward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
-				m_colorLayers[i]->optimize( nEvaluation, &m_pool );
-
-				if( i != 0 )
-				{
-					RPML_ASSERT( outputMat.col() == m_colorLayers[i]->inputDimensions() );
-				}
-				inputMat.swap( outputMat );
+				m_pool.processTask();
 			}
-
-			Mat densityBackwardInput( densityMat.row(), densityMat.col() );
-			for( int iy = 0; iy < densityMat.row(); iy++ )
-			{
-				for( int ix = 0; ix < densityMat.col(); ix++ )
-				{
-					densityBackwardInput( ix, iy ) = inputMat( ix, iy );
-				}
-				densityBackwardInput( 0, iy ) += dL_dSigma( 0, iy );
-			}
-
-			inputMat = densityBackwardInput;
-
-			for( int i = (int)m_densityLayers.size() - 1; 0 <= i; i-- )
-			{
-				RPML_ASSERT( inputMat.col() == m_densityLayers[i]->outputDimensions() );
-				m_densityLayers[i]->backward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
-				m_densityLayers[i]->optimize( nEvaluation, &m_pool );
-
-				if( i != 0 )
-				{
-					RPML_ASSERT( outputMat.col() == m_densityLayers[i]->inputDimensions() );
-				}
-				inputMat.swap( outputMat );
-			}
-
 			return loss;
 		}
 
@@ -1948,7 +1959,7 @@ namespace rpml
 			std::vector<float> points;
 
 			const float dt = std::sqrt( 3.0f ) / MLP_STEP;
-			for( int i = 0; i < nElement; i++ )
+			for( int64_t i = 0; i < nElement; i++ )
 			{
 				NeRFInput input = inputs[i];
 
@@ -1958,7 +1969,9 @@ namespace rpml
 				int nSteps = 0;
 				for( ;; )
 				{
-					float t = dt * nSteps++;
+					static StandardRng rng;
+					float t = dt * ( nSteps + rng.draw() );
+					nSteps++;
 					float x = input.ro[0] + input.rd[0] * t;
 					float y = input.ro[1] + input.rd[1] * t;
 					float z = input.ro[2] + input.rd[2] * t;
@@ -1983,95 +1996,117 @@ namespace rpml
 				marchings.push_back( m );
 			}
 
-			Mat inputMat( points.size() / 3, 3 );
-			Mat outputMat;
+			pr::TaskGroup g;
+			g.addElements( nElement );
+			m_pool.enqueueFor( nElement, 8, [&]( int64_t beg, int64_t end ) {
+				int mBegin = marchings[beg].beg;
+				int mEnd = marchings[end - 1].end;
+				int nTasks = end - beg;
+				int nLocalEvaluation = mEnd - mBegin;
+				int nEvaluation = points.size() / 3;
 
-			for( int i = 0; i < points.size() / 3; i++ )
-			{
-				inputMat( 0, i ) = points[i * 3];
-				inputMat( 1, i ) = points[i * 3 + 1];
-				inputMat( 2, i ) = points[i * 3 + 2];
-			}
+				Mat inputMat( nLocalEvaluation, 3 );
+				Mat outputMat;
 
-			LocalStorage densityStorage;
-			LocalStorage colorStorage;
-			densityStorage.layerContexts.resize( m_densityLayers.size() );
-			colorStorage.layerContexts.resize( m_colorLayers.size() );
-
-			for( int i = 0; i < m_densityLayers.size(); i++ )
-			{
-				RPML_ASSERT( inputMat.col() == m_densityLayers[i]->inputDimensions() );
-				m_densityLayers[i]->forward( &outputMat, inputMat, &densityStorage.layerContexts[i] );
-				RPML_ASSERT( outputMat.col() == m_densityLayers[i]->outputDimensions() );
-				inputMat.swap( outputMat );
-			}
-
-			Mat densityMat = inputMat;
-
-			// combine dir
-			Mat combinedMat( densityMat.row(), densityMat.col() + 16 );
-			for( int i = 0; i < nElement; i++ )
-			{
-				NeRFInput input = inputs[i];
-				float sh_encode[16] = {};
-				sh_L4( sh_encode, input.rd[0], input.rd[1], input.rd[2] );
-
-				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
+				for( int i = mBegin; i < mEnd; i++ )
 				{
-					// original
-					for( int k = 0; k < MLP_DENSITY_OUT; ++k )
-					{
-						combinedMat( k, j ) = densityMat( k, j );
-					}
+					int localI = i - mBegin;
+					inputMat( 0, localI ) = points[i * 3];
+					inputMat( 1, localI ) = points[i * 3 + 1];
+					inputMat( 2, localI ) = points[i * 3 + 2];
+				}
 
-					// dir
-					for( int k = 0; k < 16; ++k )
+				for( int i = 0; i < m_densityLayers.size(); i++ )
+				{
+					RPML_ASSERT( inputMat.col() == m_densityLayers[i]->inputDimensions() );
+					m_densityLayers[i]->forward( &outputMat, inputMat, nullptr );
+					RPML_ASSERT( outputMat.col() == m_densityLayers[i]->outputDimensions() );
+					inputMat.swap( outputMat );
+				}
+
+				Mat densityMat = inputMat;
+
+				// combine dir
+				Mat combinedMat( densityMat.row(), densityMat.col() + 16 );
+				for( int i = beg; i < end; i++ )
+				{
+					NeRFInput input = inputs[i];
+					float sh_encode[16] = {};
+					sh_L4( sh_encode, input.rd[0], input.rd[1], input.rd[2] );
+
+					for( int j = marchings[i].beg; j < marchings[i].end; j++ )
 					{
-						combinedMat( MLP_DENSITY_OUT + k, j ) = sh_encode[k];
+						int localJ = j - mBegin;
+
+						// original
+						for( int k = 0; k < MLP_DENSITY_OUT; ++k )
+						{
+							combinedMat( k, localJ ) = densityMat( k, localJ );
+						}
+						// dir
+						for( int k = 0; k < 16; ++k )
+						{
+							combinedMat( MLP_DENSITY_OUT + k, localJ ) = sh_encode[k];
+						}
 					}
 				}
-			}
-			inputMat.swap( combinedMat );
+				inputMat.swap( combinedMat );
 
-			for( int i = 0; i < m_colorLayers.size(); i++ )
-			{
-				RPML_ASSERT( inputMat.col() == m_colorLayers[i]->inputDimensions() );
-				m_colorLayers[i]->forward( &outputMat, inputMat, &colorStorage.layerContexts[i] );
-				RPML_ASSERT( outputMat.col() == m_colorLayers[i]->outputDimensions() );
-				inputMat.swap( outputMat );
-			}
-
-			float loss = 0.0f;
-
-			Mat dL_dC( inputMat.row(), inputMat.col() );
-			Mat dL_dSigma( inputMat.row(), 1 );
-			for( int i = 0; i < nElement; i++ )
-			{
-				float oColor[3] = {};
-				float T = 1.0f;
-				for( int j = marchings[i].beg; j < marchings[i].end; j++ )
+				for( int i = 0; i < m_colorLayers.size(); i++ )
 				{
-					float sigma = densityActivation( densityMat( 0, j ) );
-					float c[3];
+					RPML_ASSERT( inputMat.col() == m_colorLayers[i]->inputDimensions() );
+					m_colorLayers[i]->forward( &outputMat, inputMat, nullptr );
+					RPML_ASSERT( outputMat.col() == m_colorLayers[i]->outputDimensions() );
+					inputMat.swap( outputMat );
+				}
+
+				Mat dL_dC( inputMat.row(), inputMat.col() );
+				Mat dL_dSigma( inputMat.row(), 1 );
+				for( int i = beg; i < end; i++ )
+				{
+					float oColor[3] = {};
+					float T = 1.0f;
+
+					// printf( "[%d] pts %d\n", i, marchings[i].end - marchings[i].beg );
+					for( int j = marchings[i].beg; j < marchings[i].end; j++ )
+					{
+						int localJ = j - mBegin;
+						float sigma = densityActivation( densityMat( 0, localJ ) );
+
+						float c[3];
+						for( int k = 0; k < 3; k++ )
+						{
+							c[k] = rgbActivation( inputMat( k, localJ ) );
+						}
+						float a = 1.0f - std::exp( -sigma * dt );
+
+						for( int k = 0; k < 3; k++ )
+						{
+							oColor[k] += T * a * c[k];
+						}
+
+						T *= ( 1.0f - a );
+
+						if( T < Teps )
+							break;
+					}
+
+					float dColor[3];
 					for( int k = 0; k < 3; k++ )
 					{
-						c[k] = rgbActivation( inputMat( k, j ) );
+						dColor[k] = oColor[k] - outputs[i].color[k];
 					}
-					float a = 1.0f - std::exp( -sigma * dt );
-					for( int k = 0; k < 3; k++ )
+
+					for( int k = 0; k < 3; ++k )
 					{
-						oColor[k] += T * a * c[k];
+						outputs[i].color[k] = oColor[k];
 					}
-					T *= ( 1.0f - a );
-
-					if( T < Teps )
-						break;
 				}
-
-				for( int k = 0; k < 3; ++k )
-				{
-					outputs[i].color[k] = oColor[k];
-				}
+				g.doneElements( end - beg );
+			} );
+			while( !g.isFinished() )
+			{
+				m_pool.processTask();
 			}
 		}
 
