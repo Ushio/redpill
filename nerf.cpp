@@ -173,7 +173,7 @@ int main()
 
 		float scale = 0.5f;
 
-		for(int k = 0 ; k < 1 ; ++k)
+		for(int k = 0 ; k < 2 ; ++k)
 		{
 			inputs.clear();
 			refs.clear();
@@ -202,7 +202,7 @@ int main()
 				GetCameraMatrix( cam3d, &proj, &view );
 				CameraRayGenerator raygen( view, proj, 800, 800 );
 
-				for( int j = 0; j < 16 ; ++j )
+				for( int j = 0; j < 2 ; ++j )
 				{
 					glm::vec3 ro;
 					glm::vec3 rd;
@@ -239,9 +239,10 @@ int main()
 					}
 				}
 			}
-			printf( "input: %d\n", (int)inputs.size() );
+			// printf( "input: %d\n", (int)inputs.size() );
+			Stopwatch sw;
 			loss = nerf.train( inputs.data(), refs.data(), inputs.size() );
-			printf( "loss %f\n", loss / inputs.size() );
+			printf( "loss %f, t = %f\n", loss / inputs.size(), sw.elapsed() );
 		}
 
 		static std::vector<NeRFInput> nerf_in;
@@ -331,6 +332,15 @@ int main()
 		}
 		bg->upload( image );
 
+		//static int iterations = 0;
+		//if( iterations++ > 32 )
+		//{
+		//	auto tr = pr::ChromeTraceGetTrace();
+		//	std::ofstream ofs( GetDataPath( "tr.json" ).c_str() );
+		//	ofs << tr;
+		//	break;
+		//}
+		 
 		// mesh visualize
 		//scene->visitPolyMesh( []( std::shared_ptr<const FPolyMeshEntity> polymesh ) 
 		//{
@@ -443,6 +453,8 @@ int main()
 
 		ImGui::SetNextWindowSize( { 600, 200 }, ImGuiCond_Once );
 		ImGui::Begin( "Panel" );
+		ImGui::Text( "loss %.6f", loss / inputs.size() );
+
 		static int itr = 0;
 		ImGui::Text( "itr %d", itr++ );
 		//ImGui::InputFloat( "globalscale", &globalscale, 0.0001f );

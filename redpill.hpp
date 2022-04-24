@@ -1583,6 +1583,40 @@ namespace rpml
 	};
 	static const float Teps = 0.0001f;
 
+	static const int OC_BASE_SIZE = 128;
+	static const float OC_MIN_A = 0.008f;
+	static const float OC_MIN_DENSITY = -OC_BASE_SIZE / std::sqrt( 3.0f ) * std::log( 1.0f - OC_MIN_A );
+
+	class OccupancyGrid
+	{
+	public:
+		OccupancyGrid() : m_grid( OC_BASE_SIZE * OC_BASE_SIZE * OC_BASE_SIZE )
+		{
+		}
+		void decay( float s = 0.95f )
+		{
+			for( int i = 0; i < m_grid .size(); ++i)
+			{
+				m_grid[i] *= s;
+			}
+		}
+		void update( float density, int x, int y, int z )
+		{
+			int index = x + OC_BASE_SIZE * y + OC_BASE_SIZE * OC_BASE_SIZE * z;
+			m_grid[index] = maxss( m_grid[index], density );
+		}
+		bool occupied( float x, float y, float z )
+		{
+			int xi = clampss( x, 0.0f, 0.999999f ) * OC_BASE_SIZE;
+			int yi = clampss( y, 0.0f, 0.999999f ) * OC_BASE_SIZE;
+			int zi = clampss( z, 0.0f, 0.999999f ) * OC_BASE_SIZE;
+			int index = xi + OC_BASE_SIZE * yi + OC_BASE_SIZE * OC_BASE_SIZE * zi;
+
+			return OC_MIN_DENSITY < m_grid[index];
+		}
+		std::vector<float> m_grid;
+	};
+
 	class NeRF
 	{
 	public:
@@ -1590,14 +1624,14 @@ namespace rpml
 		{
 			MLP_DENSITY_OUT = 16,
 			MLP_WIDTH = 64,
-			MLP_STEP = 64,
-			//MLP_STEP = 512,
+			//MLP_STEP = 64,
+			MLP_STEP = 1024,
 		};
 		NeRF( ) : m_pool( std::thread::hardware_concurrency() )
 		{
 			std::unique_ptr<Rng> rng = std::unique_ptr<Rng>( new StandardRng() );
 			
-			float learningRate = 512.0f;
+			float learningRate = 256;
 			InitializationType initializerType = InitializationType::He;
 			int input = 3; /* xyz */
 			int output = 0;
@@ -1684,10 +1718,76 @@ namespace rpml
 			float y = rgbActivation( x );
 			return y * ( 1 - y );
 		}
+		void updateOccupancyGrid()
+		{
+			{
+#if ENABLE_TRACE
+				pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+				tr.label( "m_occupancyGrid.decay()" );
+#endif
+				m_occupancyGrid.decay();
+			}
+			pr::TaskGroup g;
+			g.addElements( OC_BASE_SIZE );
+			m_pool.enqueueFor( OC_BASE_SIZE, 8, [&]( int64_t beg, int64_t end ) {
+#if ENABLE_TRACE
+				pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+				tr.label( "update cells" );
+#endif
+				static thread_local StandardRng rng;
 
+				Mat inputMat( ( end - beg ) * OC_BASE_SIZE * OC_BASE_SIZE, 3 );
+				Mat outputMat;
+
+				int i = 0;
+				for( int64_t zi = beg ; zi < end ; zi++ )
+				for( int yi = 0; yi < OC_BASE_SIZE; yi++ )
+				for( int xi = 0; xi < OC_BASE_SIZE; xi++ )
+				{
+					float x = ( xi + rng.draw() ) / OC_BASE_SIZE;
+					float y = ( yi + rng.draw() ) / OC_BASE_SIZE;
+					float z = ( zi + rng.draw() ) / OC_BASE_SIZE;
+					inputMat( 0, i ) = x;
+					inputMat( 1, i ) = y;
+					inputMat( 2, i ) = z;
+
+					i++;
+				}
+
+				for( int i = 0; i < m_densityLayers.size(); i++ )
+				{
+					RPML_ASSERT( inputMat.col() == m_densityLayers[i]->inputDimensions() );
+					m_densityLayers[i]->forward( &outputMat, inputMat, nullptr );
+					RPML_ASSERT( outputMat.col() == m_densityLayers[i]->outputDimensions() );
+					inputMat.swap( outputMat );
+				}
+
+				i = 0;
+				for( int64_t zi = beg; zi < end; zi++ )
+				for( int yi = 0; yi < OC_BASE_SIZE; yi++ )
+				for( int xi = 0; xi < OC_BASE_SIZE; xi++ )
+				{
+					float density = densityActivation( inputMat( 0, i ) );
+					m_occupancyGrid.update( density, xi, yi, zi );
+					i++;
+				}
+				g.doneElements( end - beg );
+			} );
+			while( !g.isFinished() )
+			{
+				m_pool.processTask();
+			}
+		}
 		float train( const NeRFInput* inputs, const NeRFOutput* outputs, int nElement )
 		{
 			// unsigned int fp_control_state = _controlfp( _EM_INEXACT, _MCW_EM );
+
+			static int oI = 0;
+			if( ++oI % 16 == 0 )
+			{
+				updateOccupancyGrid();
+				m_hasOc = true;
+			}
 
 			float loss = 0.0f;
 
@@ -1696,8 +1796,12 @@ namespace rpml
 			std::fill( densityLayerTasks.begin(), densityLayerTasks.end(), 0 );
 			std::fill( colorLayerTasks.begin(), colorLayerTasks.end(), 0 );
 
-			std::vector<NeRFMarching> marchings;
-			std::vector<float> points;
+			std::vector<NeRFMarching>& marchings = m_marchings;
+			std::vector<float>& points = m_points;
+			marchings.clear();
+			points.clear();
+
+			int nSkipEval = 0;
 
 			const float dt = std::sqrt( 3.0f ) / MLP_STEP;
 			for( int64_t i = 0; i < nElement; i++ )
@@ -1716,6 +1820,7 @@ namespace rpml
 					float x = input.ro[0] + input.rd[0] * t;
 					float y = input.ro[1] + input.rd[1] * t;
 					float z = input.ro[2] + input.rd[2] * t;
+
 					
 					// todo: adjust range
 					const float eps = 0.000001f;
@@ -1728,6 +1833,13 @@ namespace rpml
 					y = clampss( y, 0.0f, 1.0f );
 					z = clampss( z, 0.0f, 1.0f );
 
+					// skip
+					if( m_hasOc && m_occupancyGrid.occupied( x, y, z ) == false )
+					{
+						nSkipEval++;
+						continue;
+					}
+
 					points.push_back( x );
 					points.push_back( y );
 					points.push_back( z );
@@ -1737,6 +1849,8 @@ namespace rpml
 				marchings.push_back( m );
 			}
 
+			printf( "nSkipEval %d\n", nSkipEval );
+
 			pr::TaskGroup g;
 			g.addElements( nElement );
 			m_pool.enqueueFor( nElement, 8, [&]( int64_t beg, int64_t end ) {
@@ -1745,6 +1859,12 @@ namespace rpml
 				int nTasks = end - beg;
 				int nLocalEvaluation = mEnd - mBegin;
 				int nEvaluation = points.size() / 3;
+
+				if( nEvaluation == 0 )
+				{
+					g.doneElements( end - beg );
+					return;
+				}
 
 				Mat inputMat( nLocalEvaluation, 3 );
 				Mat outputMat;
@@ -1819,13 +1939,15 @@ namespace rpml
 						int localJ = j - mBegin;
 						float sigma = densityActivation( densityMat( 0, localJ ) );
 
+						//if( m_hasOc)
+						//printf( "%f\n", sigma );
+
 						float c[3];
 						for(int k = 0 ; k < 3 ; k++ )
 						{
 							c[k] = rgbActivation( inputMat( k, localJ ) );
 						}
 						float a = 1.0f - std::exp( -sigma * dt );
-						// printf( "a : %f\n", a );
 
 						for( int k = 0; k < 3; k++ )
 						{
@@ -1951,8 +2073,10 @@ namespace rpml
 
 		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement )
 		{
-			std::vector<NeRFMarching> marchings;
-			std::vector<float> points;
+			std::vector<NeRFMarching>& marchings = m_marchings;
+			std::vector<float>& points = m_points;
+			marchings.clear();
+			points.clear();
 
 			const float dt = std::sqrt( 3.0f ) / MLP_STEP;
 			for( int64_t i = 0; i < nElement; i++ )
@@ -1979,6 +2103,12 @@ namespace rpml
 						break;
 					}
 
+					// skip
+					if( m_hasOc && m_occupancyGrid.occupied( x, y, z ) == false )
+					{
+						continue;
+					}
+
 					x = clampss( x, 0.0f, 1.0f );
 					y = clampss( y, 0.0f, 1.0f );
 					z = clampss( z, 0.0f, 1.0f );
@@ -1989,6 +2119,7 @@ namespace rpml
 				}
 
 				m.end = points.size() / 3;
+
 				marchings.push_back( m );
 			}
 
@@ -2087,12 +2218,6 @@ namespace rpml
 							break;
 					}
 
-					float dColor[3];
-					for( int k = 0; k < 3; k++ )
-					{
-						dColor[k] = oColor[k] - outputs[i].color[k];
-					}
-
 					for( int k = 0; k < 3; ++k )
 					{
 						outputs[i].color[k] = oColor[k];
@@ -2105,9 +2230,13 @@ namespace rpml
 				m_pool.processTask();
 			}
 		}
+		std::vector<NeRFMarching> m_marchings;
+		std::vector<float> m_points;
 
 		std::vector<std::unique_ptr<Layer>> m_densityLayers;
 		std::vector<std::unique_ptr<Layer>> m_colorLayers;
+		bool m_hasOc = false;
+		OccupancyGrid m_occupancyGrid;
 		pr::ThreadPool m_pool;
 	};
 
