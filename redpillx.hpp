@@ -23,6 +23,20 @@ namespace rpml
 		int padd1;
 		int padd2;
 	};
+	struct MLPForwardFusedArg
+	{
+		GPUMat inputMat;
+		GPUMat outputMat;
+		GPUMat m_Ws[16];
+		GPUMat m_Bs[16];
+		int nLayer;
+		int padd0;
+		int padd1;
+		int padd2;
+	};
+
+	#define FUSED 0
+
 	// assume Relu
 	class MLP_GPU_Forward
 	{
@@ -62,13 +76,16 @@ namespace rpml
 
 			m_matBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, location * sizeof( float ), "Layer Mat" ) );
 
+			#if FUSED
+			m_forwardShader = std::unique_ptr<dx::Shader>( new dx::Shader( device, ( kernels + "\\mlpForwardFused.hlsl" ).c_str(), kernels.c_str(), dx::CompileMode::Release ) );
+			#else
 			m_forwardShader = std::unique_ptr<dx::Shader>( new dx::Shader( device, ( kernels + "\\mlpForward.hlsl" ).c_str(), kernels.c_str(), dx::CompileMode::Release ) );
+			#endif
 			m_arg = std::unique_ptr<dx::Shader::Argument>( m_forwardShader->newArgument( device ) );
 		}
 
 		void copyH2D( dx::Device* device )
 		{
-			// probably copy is wrong
 			for( int i = 0; i < m_affineLayers.size() ; ++i)
 			{
 				device->copyH2D( m_matBuffer.get(), m_affineLayers[i]->m_W.data(), m_Ws[i].m_location * sizeof( float ), m_affineLayers[i]->m_W.bytes() );
@@ -90,7 +107,43 @@ namespace rpml
 			{
 				m_outputBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, maxMatBytes, "Output Mat" ) );
 			}
-			
+
+
+#if FUSED
+			GPUMat inputGPU;
+			inputGPU.m_location = 0;
+			inputGPU.m_row = row;
+			inputGPU.m_paddedRow = paddedRow;
+			inputGPU.m_col = input.col();
+			device->copyH2D( m_inputBuffer.get(), input.data(), 0, input.bytes() );
+
+			GPUMat outputGPU;
+			outputGPU.m_location = 0;
+			outputGPU.m_row = row;
+			outputGPU.m_paddedRow = paddedRow;
+			outputGPU.m_col = m_affineLayers[m_affineLayers.size() - 1]->m_W.col();
+
+			MLPForwardFusedArg arg;
+			arg.inputMat = inputGPU;
+			arg.outputMat = outputGPU;
+			for( int i = 0; i < m_affineLayers.size(); ++i )
+			{
+				arg.m_Ws[i] = m_Ws[i];
+				arg.m_Bs[i] = m_Bs[i];
+			}
+			arg.nLayer = m_affineLayers.size();
+
+			m_arg->Constant( "mlpForwardFusedArg", arg );
+			m_arg->RWStructured( "inputs", m_inputBuffer.get() );
+			m_arg->RWStructured( "outputs", m_outputBuffer.get() );
+			m_arg->RWStructured( "matBuffer", m_matBuffer.get() );
+
+			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 64 ), 1 );
+
+			output->setShape( outputGPU.m_row, outputGPU.m_col );
+			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
+#else
+
 			GPUMat inputGPU;
 			inputGPU.m_location = 0;
 			inputGPU.m_row = row;
@@ -130,7 +183,7 @@ namespace rpml
 
 			output->setShape( inputGPU.m_row, inputGPU.m_col );
 			device->copyD2H( output->data(), m_inputBuffer.get(), 0, output->bytes() );
-
+#endif
 			device->present();
 		}
 
