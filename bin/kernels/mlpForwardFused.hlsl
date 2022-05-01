@@ -38,7 +38,7 @@ struct MLPForwardFusedArg
     GPUMat m_Ws[16];
     GPUMat m_Bs[16];
     int nLayer;
-    int padd0;
+    int nBlock;
     int padd1;
     int padd2;
 };
@@ -108,10 +108,18 @@ ConstantBuffer<MLPForwardFusedArg> mlpForwardFusedArg;
 
 groupshared float tensor[2][TENSOR_ROW * 64];
 
+#define DISPATCH_CHUNK 8096
+
 [numthreads(8, 8, 1)]
-void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID )
+void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID, uint3 groupId: SV_GroupID )
 {
-    // int xi = threadId.x;
+    // block: 8x8
+	if( mlpForwardFusedArg.nBlock <= groupId.y + groupId.z * DISPATCH_CHUNK )
+	{
+		return;
+    }
+	threadId.y = threadId.y + threadId.z * DISPATCH_CHUNK * 8 /* numthreads(8, x, 1) */;
+
     int yi = threadId.y;
     int yi_local = localId.y;
 
@@ -119,10 +127,7 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
         // matrix row is always multiple of 8
         for( int xi = 0 ; xi < mlpForwardFusedArg.inputMat.m_col ; xi++)
         {
-            if( yi_local < TENSOR_ROW )
-            {
-                tensor[0][ xi * TENSOR_ROW + yi_local ] = getElem( xi, yi, inputs, mlpForwardFusedArg.inputMat );
-            }
+			tensor[0][xi * TENSOR_ROW + yi_local] = getElem( xi, yi, inputs, mlpForwardFusedArg.inputMat );
         }
     }
 
@@ -167,11 +172,8 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
         // matrix row is always multiple of 8
         for( int xi = 0 ; xi < mlpForwardFusedArg.outputMat.m_col ; xi++)
         {
-            if( yi_local < TENSOR_ROW )
-            {
-                float s = tensor[tensorOut][ xi * TENSOR_ROW + yi_local ];
-                setElem( xi, yi, outputs, mlpForwardFusedArg.outputMat, s );
-            }
+            float s = tensor[tensorOut][ xi * TENSOR_ROW + yi_local ];
+            setElem( xi, yi, outputs, mlpForwardFusedArg.outputMat, s );
         }
     }
 }

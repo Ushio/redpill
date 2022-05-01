@@ -30,12 +30,12 @@ namespace rpml
 		GPUMat m_Ws[16];
 		GPUMat m_Bs[16];
 		int nLayer;
-		int padd0;
+		int nBlock;
 		int padd1;
 		int padd2;
 	};
 
-	#define FUSED 0
+	#define FUSED 1
 
 	// assume Relu
 	class MLP_GPU_Forward
@@ -134,13 +134,19 @@ namespace rpml
 			}
 			arg.nLayer = m_affineLayers.size();
 
+			// workaround for D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION
+#define DISPATCH_CHUNK 8096
+			int numberOfBlock = div_round_up( row, 8 );
+			int numberOfChunk = div_round_up( numberOfBlock, DISPATCH_CHUNK );
+			arg.nBlock = numberOfBlock;
+
 			m_arg->Constant( "mlpForwardFusedArg", arg );
 			m_arg->RWStructured( "inputs", m_inputBuffer.get() );
 			m_arg->RWStructured( "outputs", m_outputBuffer.get() );
 			m_arg->RWStructured( "matBuffer", m_matBuffer.get() );
 
-			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 64 ), 1 );
-			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 8 ), 1 );
+			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 8 ), 1 );
+			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
 
 			output->setShape( outputGPU.m_row, outputGPU.m_col );
 			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
