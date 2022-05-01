@@ -235,6 +235,7 @@ namespace rpml
 			return m_data[m_paddedRow * x + y];
 		}
 		int row() const { return m_row; }
+		int paddedRow() const { return m_paddedRow; }
 		int col() const { return m_col; }
 
 		void swap( Mat& rhs )
@@ -243,6 +244,19 @@ namespace rpml
 			std::swap( m_row, rhs.m_row );
 			std::swap( m_paddedRow, rhs.m_paddedRow );
 			std::swap( m_col, rhs.m_col );
+		}
+		
+		const float* data() const
+		{
+			return m_data.data();
+		}
+		float* data()
+		{
+			return m_data.data();
+		}
+		int bytes() const
+		{
+			return m_data.size() * sizeof( float );
 		}
 	private:
 		std::vector<float> m_data;
@@ -729,7 +743,7 @@ namespace rpml
 		int m_outputDimensions;
 	};
 
-#define ENABLE_BIAS 0
+#define ENABLE_BIAS 1
 
 	class AffineLayer : public Layer
 	{
@@ -1102,15 +1116,6 @@ namespace rpml
 			int F = 2;
 			int Nmin = 16;
 			float b = 1.38191f;
-			//int Nmax = 7500;
-			//float b() const
-			//{
-			//	if( L <= 1 )
-			//	{
-			//		return 1.0f;
-			//	}
-			//	return std::exp( std::log( (float)Nmax / (float)Nmin ) / ( L - 1 ) );
-			//}
 		};
 
 		static int output( int input, const Config& config )

@@ -23,10 +23,25 @@ project "demo"
     -- Src
     files { "main.cpp" }
     files { "redpill.hpp" }
+    files { "redpillx.hpp" }
 
     -- UTF8
     postbuildcommands { 
         "mt.exe -manifest ../utf8.manifest -outputresource:$(TargetDir)$(TargetName).exe -nologo"
+    }
+
+    -- Helper
+    files { "libs/d3dx12/*.h" }
+    includedirs { "libs/d3dx12/" }
+
+    links { "dxgi" }
+    links { "d3d12" }
+
+    -- HLSL compiler
+    includedirs { "libs/dxc_2021_12_08/inc" }
+    links { "libs/dxc_2021_12_08/lib/x64/dxcompiler" }
+    postbuildcommands { 
+        "{COPYFILE} ../libs/dxc_2021_12_08/bin/x64/*.dll ../bin"
     }
 
     -- json

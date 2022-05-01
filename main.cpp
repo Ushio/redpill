@@ -5,6 +5,8 @@
 
 #define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
+#include "redpillx.hpp"
+
 using namespace rpml;
 
 //#include <json.hpp>
@@ -181,24 +183,38 @@ int main()
 
 	//float vals[2][2]    = {};
 
-
 	Image2DRGBA8 image;
 	//image.load( "img/albert.jpg" );
-	//image.load( "img/small_albert.jpg" );
-	image.load( "img/coyote.jpg" );
+	image.load( "img/small_albert.jpg" );
+	//image.load( "img/coyote.jpg" );
 	
-	float previewScale = 1.0f;
+	float previewScale = 0.5;
 
 	ITexture *texture = CreateTexture();
 
+	//MLP mlp( MLPConfig()
+	//			 .shape( { 2, 64, 64, 3 } )
+	//			 .learningRate( 10.0f )
+	//			 .initType( InitializationType::He )
+	//			 .optimType( OptimizerType::Adam )
+	//			 .activationType( ActivationType::ReLU )
+	//			 .encoderType( EncoderType::MultiResolutionHash ) );
+
 	MLP mlp( MLPConfig()
 				 .shape( { 2, 64, 64, 3 } )
-				 .learningRate( 10.0f )
-				 .initType( InitializationType::He )
-				 .optimType( OptimizerType::Adam )
-				 .activationType( ActivationType::ReLU )
-				 .encoderType( EncoderType::MultiResolutionHash ) );
+				.learningRate( 10.0f )
+				.initType( InitializationType::He )
+				.optimType( OptimizerType::Adam )
+				.activationType( ActivationType::ReLU ) );
 
+	/* gpu estimator */
+	dx::activateDebugLayer();
+	auto adapters = dx::allAdapters();
+	dx::Device device( adapters[0] );
+	MLP_GPU_Forward mlpx( &device, mlp, pr::GetDataPath("kernels") );
+
+	//dx::Shader shader( &device, pr::GetDataPath( "src/hello.hlsl" ).c_str(), pr::GetDataPath( "src/" ).c_str(), dx::CompileMode::Release );
+	//std::unique_ptr<dx::Shader::Argument> arg( shader.newArgument( &device ) );
 
 	Config config;
 	config.ScreenWidth = 1500;
@@ -267,11 +283,46 @@ int main()
 		Stopwatch sw_estimate;
 		
 		Image2DRGBA8 estimatedImage;
-		estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
+		 estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
+		 float sEstimate = sw_estimate.elapsed();
+
+		//mlpx.copyH2D( &device );
+
+		//int estimatorWidth = image.width() * previewScale;
+		//int estimatorHeight = image.height() * previewScale;
+		//static Mat inUVs;
+		//static Mat outColors;
+		//estimatedImage.allocate( estimatorWidth, estimatorHeight );
+		//inUVs.setShape( estimatorWidth * estimatorHeight, 2 );
+
+		//for( int yi = 0; yi < estimatorHeight; yi++ )
+		//{
+		//	for( int xi = 0; xi < estimatorWidth; xi++ )
+		//	{
+		//		int i = yi * estimatorWidth + xi;
+		//		inUVs( 0, i ) = ( xi + 0.5f ) / (float)estimatorWidth;
+		//		inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
+		//	}
+		//}
+		//mlpx.foward( &device, inUVs, &outColors );
+		//float sEstimate = sw_estimate.elapsed();
+
+		//for( int yi = 0; yi < estimatorHeight; yi++ )
+		//{
+		//	for( int xi = 0; xi < estimatorWidth; xi++ )
+		//	{
+		//		int i = yi * estimatorWidth + xi;
+		//		estimatedImage( xi, yi ) = glm::uvec4(
+		//			glm::clamp<int>( outColors( 0, i ) * 255.0f, 0, 255 ),
+		//			glm::clamp<int>( outColors( 1, i ) * 255.0f, 0, 255 ),
+		//			glm::clamp<int>( outColors( 2, i ) * 255.0f, 0, 255 ),
+		//			255 );
+		//	}
+		//}
 
 		Stopwatch sw_upload;
 
-		float sEstimate = sw_estimate.elapsed();
+		
 		texture->upload( estimatedImage );
 
 		float sUpload = sw_upload.elapsed();
