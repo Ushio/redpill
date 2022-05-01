@@ -188,7 +188,7 @@ int main()
 	image.load( "img/small_albert.jpg" );
 	//image.load( "img/coyote.jpg" );
 	
-	float previewScale = 0.5;
+	float previewScale = 1;
 
 	ITexture *texture = CreateTexture();
 
@@ -205,12 +205,13 @@ int main()
 				.learningRate( 10.0f )
 				.initType( InitializationType::He )
 				.optimType( OptimizerType::Adam )
-				.activationType( ActivationType::ReLU ) );
+				 .activationType( ActivationType::ReLU ) );
 
 	/* gpu estimator */
 	dx::activateDebugLayer();
 	auto adapters = dx::allAdapters();
 	dx::Device device( adapters[0] );
+
 	MLP_GPU_Forward mlpx( &device, mlp, pr::GetDataPath("kernels") );
 
 	//dx::Shader shader( &device, pr::GetDataPath( "src/hello.hlsl" ).c_str(), pr::GetDataPath( "src/" ).c_str(), dx::CompileMode::Release );
@@ -283,42 +284,42 @@ int main()
 		Stopwatch sw_estimate;
 		
 		Image2DRGBA8 estimatedImage;
-		 estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
-		 float sEstimate = sw_estimate.elapsed();
+		// estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
+		// float sEstimate = sw_estimate.elapsed();
 
-		//mlpx.copyH2D( &device );
+		mlpx.copyH2D( &device );
 
-		//int estimatorWidth = image.width() * previewScale;
-		//int estimatorHeight = image.height() * previewScale;
-		//static Mat inUVs;
-		//static Mat outColors;
-		//estimatedImage.allocate( estimatorWidth, estimatorHeight );
-		//inUVs.setShape( estimatorWidth * estimatorHeight, 2 );
+		int estimatorWidth = image.width() * previewScale;
+		int estimatorHeight = image.height() * previewScale;
+		static Mat inUVs;
+		static Mat outColors;
+		estimatedImage.allocate( estimatorWidth, estimatorHeight );
+		inUVs.setShape( estimatorWidth * estimatorHeight, 2 );
 
-		//for( int yi = 0; yi < estimatorHeight; yi++ )
-		//{
-		//	for( int xi = 0; xi < estimatorWidth; xi++ )
-		//	{
-		//		int i = yi * estimatorWidth + xi;
-		//		inUVs( 0, i ) = ( xi + 0.5f ) / (float)estimatorWidth;
-		//		inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
-		//	}
-		//}
-		//mlpx.foward( &device, inUVs, &outColors );
-		//float sEstimate = sw_estimate.elapsed();
+		for( int yi = 0; yi < estimatorHeight; yi++ )
+		{
+			for( int xi = 0; xi < estimatorWidth; xi++ )
+			{
+				int i = yi * estimatorWidth + xi;
+				inUVs( 0, i ) = ( xi + 0.5f ) / (float)estimatorWidth;
+				inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
+			}
+		}
+		mlpx.foward( &device, inUVs, &outColors );
+		float sEstimate = sw_estimate.elapsed();
 
-		//for( int yi = 0; yi < estimatorHeight; yi++ )
-		//{
-		//	for( int xi = 0; xi < estimatorWidth; xi++ )
-		//	{
-		//		int i = yi * estimatorWidth + xi;
-		//		estimatedImage( xi, yi ) = glm::uvec4(
-		//			glm::clamp<int>( outColors( 0, i ) * 255.0f, 0, 255 ),
-		//			glm::clamp<int>( outColors( 1, i ) * 255.0f, 0, 255 ),
-		//			glm::clamp<int>( outColors( 2, i ) * 255.0f, 0, 255 ),
-		//			255 );
-		//	}
-		//}
+		for( int yi = 0; yi < estimatorHeight; yi++ )
+		{
+			for( int xi = 0; xi < estimatorWidth; xi++ )
+			{
+				int i = yi * estimatorWidth + xi;
+				estimatedImage( xi, yi ) = glm::uvec4(
+					glm::clamp<int>( outColors( 0, i ) * 255.0f, 0, 255 ),
+					glm::clamp<int>( outColors( 1, i ) * 255.0f, 0, 255 ),
+					glm::clamp<int>( outColors( 2, i ) * 255.0f, 0, 255 ),
+					255 );
+			}
+		}
 
 		Stopwatch sw_upload;
 

@@ -27,7 +27,7 @@ project "demo"
 
     -- UTF8
     postbuildcommands { 
-        "mt.exe -manifest ../utf8.manifest -outputresource:$(TargetDir)$(TargetName).exe -nologo"
+        "mt.exe -manifest ../utf8.manifest -outputresource:\"$(TargetDir)$(TargetName).exe\" -nologo"
     }
 
     -- Helper
@@ -91,7 +91,7 @@ project "nerf"
 
     -- UTF8
     postbuildcommands { 
-        "mt.exe -manifest ../utf8.manifest -outputresource:$(TargetDir)$(TargetName).exe -nologo"
+        "mt.exe -manifest ../utf8.manifest -outputresource:\"$(TargetDir)$(TargetName).exe\" -nologo"
     }
 
     -- json
@@ -141,7 +141,7 @@ project "bugcatcher"
 
     -- UTF8
     postbuildcommands { 
-        "mt.exe -manifest ../utf8.manifest -outputresource:$(TargetDir)$(TargetName).exe -nologo"
+        "mt.exe -manifest ../utf8.manifest -outputresource:\"$(TargetDir)$(TargetName).exe\" -nologo"
     }
 
     symbols "On"

@@ -95,33 +95,34 @@ namespace rpml
 
 		void foward( dx::Device* device, const Mat& input, Mat *output )
 		{
+#if FUSED
 			int row = input.row();
 			int paddedRow = input.paddedRow();
-			int maxMatBytes = paddedRow * m_maxCol * sizeof( float );
 
-			if( !m_inputBuffer || m_inputBuffer->bytes() < maxMatBytes )
-			{
-				m_inputBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, maxMatBytes, "Input Mat" ) );
-			}
-			if( !m_outputBuffer || m_outputBuffer->bytes() < maxMatBytes )
-			{
-				m_outputBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, maxMatBytes, "Output Mat" ) );
-			}
-
-
-#if FUSED
 			GPUMat inputGPU;
 			inputGPU.m_location = 0;
 			inputGPU.m_row = row;
 			inputGPU.m_paddedRow = paddedRow;
 			inputGPU.m_col = input.col();
+
+			if( !m_inputBuffer || m_inputBuffer->bytes() < input.bytes() )
+			{
+				m_inputBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, input.bytes(), "Input Mat" ) );
+			}
+
 			device->copyH2D( m_inputBuffer.get(), input.data(), 0, input.bytes() );
+
 
 			GPUMat outputGPU;
 			outputGPU.m_location = 0;
 			outputGPU.m_row = row;
 			outputGPU.m_paddedRow = paddedRow;
 			outputGPU.m_col = m_affineLayers[m_affineLayers.size() - 1]->m_W.col();
+			int64_t outputGPUBytes = (int64_t)outputGPU.m_paddedRow * outputGPU.m_col * sizeof(float);
+			if( !m_outputBuffer || m_outputBuffer->bytes() < outputGPUBytes )
+			{
+				m_outputBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, outputGPUBytes, "Output Mat" ) );
+			}
 
 			MLPForwardFusedArg arg;
 			arg.inputMat = inputGPU;
@@ -138,11 +139,24 @@ namespace rpml
 			m_arg->RWStructured( "outputs", m_outputBuffer.get() );
 			m_arg->RWStructured( "matBuffer", m_matBuffer.get() );
 
-			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 64 ), 1 );
+			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 64 ), 1 );
+			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 8 ), 1 );
 
 			output->setShape( outputGPU.m_row, outputGPU.m_col );
 			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
 #else
+			int row = input.row();
+			int paddedRow = input.paddedRow();
+			int64_t maxMatBytes = (int64_t)paddedRow * m_maxCol * sizeof( float );
+
+			if( !m_inputBuffer || m_inputBuffer->bytes() < maxMatBytes )
+			{
+				m_inputBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, maxMatBytes, "Input Mat" ) );
+			}
+			if( !m_outputBuffer || m_outputBuffer->bytes() < maxMatBytes )
+			{
+				m_outputBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, maxMatBytes, "Output Mat" ) );
+			}
 
 			GPUMat inputGPU;
 			inputGPU.m_location = 0;
