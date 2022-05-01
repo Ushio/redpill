@@ -18,6 +18,14 @@ float relu( float x )
 {
     return max( x, 0.0f );
 }
+inline int div_round_up( int val, int divisor )
+{
+    return ( val + divisor - 1 ) / divisor;
+}
+inline int next_multiple( int val, int divisor )
+{
+    return div_round_up( val, divisor ) * divisor;
+}
 
 RWStructuredBuffer<float> inputs;
 RWStructuredBuffer<float> outputs;
@@ -36,9 +44,71 @@ struct MLPForwardFusedArg
 };
 ConstantBuffer<MLPForwardFusedArg> mlpForwardFusedArg;
 
-groupshared float tensor[2][64 * 64];
 
-[numthreads(1,64,1)]
+// groupshared float tensor[2][64 * 64];
+
+// [numthreads(1,64,1)]
+// void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID )
+// {
+//     // int xi = threadId.x;
+//     int yi = threadId.y;
+//     int yi_local = localId.y;
+
+//     {
+//         // todo out of bounds
+//         for( int xi = 0 ; xi < mlpForwardFusedArg.inputMat.m_col ; xi++)
+//         {
+//             tensor[0][ xi * 64 + yi_local ] = getElem( xi, yi, inputs, mlpForwardFusedArg.inputMat );
+//         }
+//     }
+
+//     GroupMemoryBarrierWithGroupSync();
+
+//     int tensorIn  = 0;
+//     int tensorOut = 1;
+    
+//     for( int i = 0 ; i < mlpForwardFusedArg.nLayer ; i++ )
+//     {
+//         int row = mlpForwardFusedArg.m_Ws[i].m_row; // input
+//         int col = mlpForwardFusedArg.m_Ws[i].m_col; // output
+
+//         for( int xi = 0 ; xi < col ; xi++ )
+//         {
+//             float s = 0.0f;
+//             for( int j = 0 ; j < row ; j++ ) 
+//             {
+//                 float a = tensor[tensorIn][ j * 64 + yi_local ];
+//                 float b = getElem( xi, j, matBuffer, mlpForwardFusedArg.m_Ws[i] );
+//                 s += a * b;
+//             }
+//             float bias = getElem( xi, 0, matBuffer, mlpForwardFusedArg.m_Bs[i] );
+//             float value = s + bias;
+//             tensor[tensorOut][ xi * 64 + yi_local ] = relu( value );
+//         }
+
+//         int tmp = tensorIn;
+//         tensorIn = tensorOut;
+//         tensorOut = tmp;
+//         GroupMemoryBarrierWithGroupSync();
+//     }
+
+//     GroupMemoryBarrierWithGroupSync();
+    
+//     {
+//         // todo out of bounds
+//         for( int xi = 0 ; xi < mlpForwardFusedArg.outputMat.m_col ; xi++)
+//         {
+//             float s = tensor[tensorIn][ xi * 64 + yi_local ];
+//             setElem( xi, yi, outputs, mlpForwardFusedArg.outputMat, s );
+//         }
+//     }
+// }
+
+#define TENSOR_ROW 8
+
+groupshared float tensor[2][TENSOR_ROW * 64];
+
+[numthreads(8, 8, 1)]
 void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID )
 {
     // int xi = threadId.x;
@@ -46,114 +116,62 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
     int yi_local = localId.y;
 
     {
-        // todo out of bounds
+        // matrix row is always multiple of 8
         for( int xi = 0 ; xi < mlpForwardFusedArg.inputMat.m_col ; xi++)
         {
-            tensor[0][ xi * 64 + yi_local ] = getElem( xi, yi, inputs, mlpForwardFusedArg.inputMat );
+            if( yi_local < TENSOR_ROW )
+            {
+                tensor[0][ xi * TENSOR_ROW + yi_local ] = getElem( xi, yi, inputs, mlpForwardFusedArg.inputMat );
+            }
         }
     }
 
     GroupMemoryBarrierWithGroupSync();
 
-    int tensorIn  = 0;
-    int tensorOut = 1;
-    
+    // int tensorIn  = 0;
+    // int tensorOut = 1;
+    [unroll(8)]
     for( int i = 0 ; i < mlpForwardFusedArg.nLayer ; i++ )
     {
         int row = mlpForwardFusedArg.m_Ws[i].m_row; // input
         int col = mlpForwardFusedArg.m_Ws[i].m_col; // output
 
-        for( int xi = 0 ; xi < col ; xi++ )
+        for( int xi_origin = 0 ; xi_origin < col ; xi_origin += 8 )
         {
+            int xi = xi_origin + localId.x;
+            if( col <= xi )
+            {
+                continue;
+            }
+
             float s = 0.0f;
             for( int j = 0 ; j < row ; j++ ) 
             {
-                float a = tensor[tensorIn][ j * 64 + yi_local ];
+                float a = tensor[i % 2][ j * TENSOR_ROW + yi_local ];
                 float b = getElem( xi, j, matBuffer, mlpForwardFusedArg.m_Ws[i] );
                 s += a * b;
             }
             float bias = getElem( xi, 0, matBuffer, mlpForwardFusedArg.m_Bs[i] );
             float value = s + bias;
-            tensor[tensorOut][ xi * 64 + yi_local ] = relu( value );
+            if( i + 1 != mlpForwardFusedArg.nLayer )
+            {
+                value = relu( value );
+            }
+            tensor[ ( i + 1 ) % 2 ][ xi * TENSOR_ROW + yi_local ] = value;
         }
-
-        int tmp = tensorIn;
-        tensorIn = tensorOut;
-        tensorOut = tmp;
         GroupMemoryBarrierWithGroupSync();
     }
 
-    GroupMemoryBarrierWithGroupSync();
-    
+    int tensorOut = mlpForwardFusedArg.nLayer % 2;
     {
-        // todo out of bounds
+        // matrix row is always multiple of 8
         for( int xi = 0 ; xi < mlpForwardFusedArg.outputMat.m_col ; xi++)
         {
-            float s = tensor[tensorIn][ xi * 64 + yi_local ];
-            setElem( xi, yi, outputs, mlpForwardFusedArg.outputMat, s );
+            if( yi_local < TENSOR_ROW )
+            {
+                float s = tensor[tensorOut][ xi * TENSOR_ROW + yi_local ];
+                setElem( xi, yi, outputs, mlpForwardFusedArg.outputMat, s );
+            }
         }
     }
 }
-
-// dispatch ( 1, N / 8, 1 )
-// [numthreads(8,8,1)]
-// void main( uint3 threadId : SV_DispatchThreadID, uint3 localID: SV_GroupThreadID )
-// {
-//     {
-//         int row = forwardInput.inputMat.m_row;
-//         int col = forwardInput.inputMat.m_col;
-//         for( int iCol = 0 ; iCol < col ; iCol += 8 )
-//         {
-//             int xi = iCol + localID.x;
-//             int yi_to   = localID.y;
-//             int yi_from = threadId.y;
-
-//             float value;
-//             if( xi < col && yi_from < row )
-//             {
-//                 value = getElem( xi, yi_from, inputs, forwardInput.inputMat );
-//             }
-//             else
-//             {
-//                 value = 0.0f;
-//             }
-//             sm[0][ xi * 8 + yi_from ] = value;
-//         }
-//     }
-
-//     GroupMemoryBarrierWithGroupSync();
-
-//     int smIn  = 0;
-//     int smOut = 1;
-//     for( int i = 0 ; i < forwardInput.nLayer ; i++ )
-//     {
-//         int row = forwardInput.m_Ws[i].m_row; // input
-//         int col = forwardInput.m_Ws[i].m_col; // output
-//         for( int iCol = 0 ; iCol < col ; iCol += 8 )
-//         {
-//             int xi = iCol + localID.x;
-//             int yi = localID.y;
-
-//             float s = 0.0f;
-//             for( int j = 0 ; j < row ; j++ ) 
-//             {
-//                 float a = sm[smIn][ j * 8 + yi ];
-//                 float b = getElem( xi, yi + j, matBuffer, forwardInput.m_Ws[i] );
-//                 s += a * b;
-//             }
-//             float bias = getElem( xi, 0, matBuffer, forwardInput.m_Bs[i] );
-//             float value = s + bias;
-//             sm[smOut][ xi * 8 + yi ] = relu( value );
-//         }
-
-//         int tmp = smIn;
-//         smIn = smOut;
-//         smOut = tmp;
-//         GroupMemoryBarrierWithGroupSync();
-//     }
-
-//     // uint index = threadId.x;
-//     inputs[0] = 0;
-//     outputs[0] = 0;
-//     matBuffer[0] = 0;
-// }
