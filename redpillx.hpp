@@ -86,11 +86,13 @@ namespace rpml
 
 		void copyH2D( dx::Device* device )
 		{
-			for( int i = 0; i < m_affineLayers.size() ; ++i)
+			m_matBufferSrc.resize( m_matBuffer->bytes() );
+			for( int i = 0; i < m_affineLayers.size(); ++i )
 			{
-				device->copyH2D( m_matBuffer.get(), m_affineLayers[i]->m_W.data(), m_Ws[i].m_location * sizeof( float ), m_affineLayers[i]->m_W.bytes() );
-				device->copyH2D( m_matBuffer.get(), m_affineLayers[i]->m_b.data(), m_Bs[i].m_location * sizeof( float ), m_affineLayers[i]->m_b.bytes() );
+				memcpy( m_matBufferSrc.data() + m_Ws[i].m_location * sizeof( float ), m_affineLayers[i]->m_W.data(), m_affineLayers[i]->m_W.bytes() );
+				memcpy( m_matBufferSrc.data() + m_Bs[i].m_location * sizeof( float ), m_affineLayers[i]->m_b.data(), m_affineLayers[i]->m_b.bytes() );
 			}
+			device->copyH2D( m_matBuffer.get(), m_matBufferSrc.data(), 0, m_matBufferSrc.size() );
 		}
 
 		void foward( dx::Device* device, const Mat& input, Mat *output )
@@ -111,7 +113,6 @@ namespace rpml
 			}
 
 			device->copyH2D( m_inputBuffer.get(), input.data(), 0, input.bytes() );
-
 
 			GPUMat outputGPU;
 			outputGPU.m_location = 0;
@@ -211,6 +212,7 @@ namespace rpml
 		std::unique_ptr<dx::Buffer> m_inputBuffer;
 		std::unique_ptr<dx::Buffer> m_outputBuffer;
 		std::unique_ptr<dx::Buffer> m_matBuffer;
+		std::vector<char> m_matBufferSrc;
 		std::vector<GPUMat> m_Ws;
 		std::vector<GPUMat> m_Bs;
 		std::vector<const AffineLayer*> m_affineLayers;
