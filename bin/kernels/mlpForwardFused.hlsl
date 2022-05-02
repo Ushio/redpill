@@ -256,9 +256,9 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
             }
         }
         GroupMemoryBarrierWithGroupSync();
-        for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        if( xi < col )
         {
-            if( xi < col )
+            for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
             {
                 tensor[yi_local][xi] = value[yi_local];
             }
