@@ -45,6 +45,15 @@ namespace rpml
 		{
 			bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
 
+			if( hasEncoder )
+			{
+				auto f = dynamic_cast<const FrequencyEncoder*>( mlp.m_layers[0].get() );
+				if( f )
+				{
+
+				}
+			}
+
 			int maxCol = 0;
 			int location = 0;
 			for( int i = ( hasEncoder ? 1 : 0 ); i < mlp.m_layers.size() ; i += 2 )
@@ -83,20 +92,13 @@ namespace rpml
 			#endif
 			m_arg = std::unique_ptr<dx::Shader::Argument>( m_forwardShader->newArgument( device ) );
 		}
-
-		void copyH2D( dx::Device* device )
-		{
-			m_matBufferSrc.resize( m_matBuffer->bytes() );
-			for( int i = 0; i < m_affineLayers.size(); ++i )
-			{
-				memcpy( m_matBufferSrc.data() + m_Ws[i].m_location * sizeof( float ), m_affineLayers[i]->m_W.data(), m_affineLayers[i]->m_W.bytes() );
-				memcpy( m_matBufferSrc.data() + m_Bs[i].m_location * sizeof( float ), m_affineLayers[i]->m_b.data(), m_affineLayers[i]->m_b.bytes() );
-			}
-			device->copyH2D( m_matBuffer.get(), m_matBufferSrc.data(), 0, m_matBufferSrc.size() );
-		}
-
 		void foward( dx::Device* device, const Mat& input, Mat *output )
 		{
+			for( int i = 0; i < m_affineLayers.size(); ++i )
+			{
+				device->copyH2D( m_matBuffer.get(), m_affineLayers[i]->m_W.data(), m_Ws[i].m_location * sizeof( float ), m_affineLayers[i]->m_W.bytes(), dx::Device::CopyMode::PrefferedEnqueue );
+				device->copyH2D( m_matBuffer.get(), m_affineLayers[i]->m_b.data(), m_Bs[i].m_location * sizeof( float ), m_affineLayers[i]->m_b.bytes(), dx::Device::CopyMode::PrefferedEnqueue );
+			}
 #if FUSED
 			int row = input.row();
 			int paddedRow = input.paddedRow();

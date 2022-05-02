@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <map>
+#include <queue>
 #include <functional>
 #include <stdarg.h>
 #include <d3d12.h>
@@ -306,25 +307,19 @@ public:
 		hr = pDxgiFactory->CreateSwapChainForComposition( m_queue.get(), &swapChainDesc, nullptr, m_swapchain.getAddressOf() );
 		DX_ASSERT( hr == S_OK, "" );
 
-		// upload heap
-		for( int i = 0; i < 2; i++ )
-		{
-			HRESULT hr;
-			hr = m_device->CreateCommittedResource(
-				&CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),
-				D3D12_HEAP_FLAG_NONE,
-				&CD3DX12_RESOURCE_DESC::Buffer( IO_CHANK_BYTES ),
-				D3D12_RESOURCE_STATE_GENERIC_READ,
-				nullptr,
-				IID_PPV_ARGS( m_uploadBuffers[i].getAddressOf() ) );
-			DX_ASSERT( hr == S_OK, "" );
+		hr = m_device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),
+			D3D12_HEAP_FLAG_NONE,
+			&CD3DX12_RESOURCE_DESC::Buffer( IO_CHANK_BYTES ),
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS( m_fragmentBuffer.getAddressOf() ) );
+		DX_ASSERT( hr == S_OK, "" );
 
-			D3D12_RANGE range = {};
-			hr = m_uploadBuffers[i]->Map( 0, &range, &m_uploadPointers[i] );
-			DX_ASSERT( hr == S_OK, "" );
-		}
-		m_uploadBuffers[0]->SetName( L"m_uploadBuffers[0]" );
-		m_uploadBuffers[1]->SetName( L"m_uploadBuffers[1]" );
+		D3D12_RANGE range = {};
+		hr = m_fragmentBuffer->Map( 0, &range, &m_fragmentPointer );
+		DX_ASSERT( hr == S_OK, "" );
+		m_fragmentBuffer->SetName( L"Fragment Buffer" );
 
 		// readback heap
 		for( int i = 0; i < 2; i++ )
@@ -344,6 +339,7 @@ public:
 		}
 		m_readbackBuffers[0]->SetName( L"m_readbackBuffers[0]" );
 		m_readbackBuffers[1]->SetName( L"m_readbackBuffers[1]" );
+
 	}
 	~Device()
 	{
@@ -372,7 +368,12 @@ public:
 		return d.Description;
 	}
 
-	void copyH2D( Buffer* buffer, const void* src, int64_t dstOffset, int64_t bytes );
+	enum class CopyMode
+	{
+		PrefferedSync,
+		PrefferedEnqueue
+	};
+	void copyH2D( Buffer* buffer, const void* src, int64_t dstOffset, int64_t bytes, CopyMode copyMode = CopyMode::PrefferedSync );
 	void copyD2H( void* dst, Buffer* buffer, int64_t srcOffset, int64_t bytes );
 
 	template <class T>
@@ -395,21 +396,21 @@ public:
 
 			std::swap( m_commandListsCurrent, m_commandListsSleeping );
 
-			m_commandSleepingFence = createFence();
+			m_commandSleepingFence = std::unique_ptr<Fence>( newFence() );
 		}
 		m_commandListsCurrent->scopedStoreCommand( f );
 
 		ID3D12CommandList* const command[] = { m_commandListsCurrent->d3d12CommandList() };
 		m_queue->ExecuteCommandLists( 1, command );
 	}
-	std::unique_ptr<Fence> createFence()
+	Fence *newFence()
 	{
-		return std::unique_ptr<Fence>( new Fence( m_device.get(), m_queue.get() ) );
+		return new Fence( m_device.get(), m_queue.get() );
 	}
 
 	void wait()
 	{
-		auto f = createFence();
+		std::unique_ptr<Fence> f( newFence() );
 		f->wait();
 	}
 
@@ -429,8 +430,18 @@ private:
 	{
 		IO_CHANK_BYTES = 1024 * 1024 * 128
 	};
-	DxPtr<ID3D12Resource> m_uploadBuffers[2];
-	void* m_uploadPointers[2];
+
+	DxPtr<ID3D12Resource> m_fragmentBuffer;
+	void* m_fragmentPointer;
+	int m_fragmentCopyingHead = 0;
+	int m_fragmentCopyingTail = 0;
+	struct CopyTask
+	{
+		int bytes;
+		std::shared_ptr<Fence> fence;
+	};
+	std::queue<CopyTask> m_fragmentCopyQueue;
+
 	DxPtr<ID3D12Resource> m_readbackBuffers[2];
 	void* m_readbackPointers[2];
 };
@@ -544,49 +555,73 @@ private:
 	std::string m_name;
 };
 
-void Device::copyH2D( Buffer* buffer, const void* src, int64_t dstOffset, int64_t bytes )
+void Device::copyH2D( Buffer* buffer, const void* src, int64_t dstOffset, int64_t bytes, CopyMode copyMode )
 {
 	DX_ASSERT( dstOffset + bytes <= buffer->bytes(), "" );
 
 	int64_t dstPtr = dstOffset;
 	int64_t srcPtr = 0;
 	int64_t reminder = bytes;
-	int index = 0;
-	std::unique_ptr<Fence> fence;
 	for( ;; )
 	{
-		int64_t batch = std::min<int64_t>( IO_CHANK_BYTES, reminder );
+		int fragmentTo = ( m_fragmentCopyingHead % IO_CHANK_BYTES );
+		int maxBatch = IO_CHANK_BYTES - fragmentTo;
+		int64_t batch = std::min<int64_t>( maxBatch, reminder );
 
-		if( fence )
+		int available = IO_CHANK_BYTES - ( m_fragmentCopyingHead - m_fragmentCopyingTail );
+		while( available < batch )
 		{
-			fence->wait();
+			CopyTask task = m_fragmentCopyQueue.front();
+			m_fragmentCopyQueue.pop();
+			task.fence->wait();
+			m_fragmentCopyingTail += task.bytes;
+			available = IO_CHANK_BYTES - ( m_fragmentCopyingHead - m_fragmentCopyingTail );
+
+			if( IO_CHANK_BYTES < m_fragmentCopyingTail && IO_CHANK_BYTES < m_fragmentCopyingHead )
+			{
+				m_fragmentCopyingTail -= IO_CHANK_BYTES;
+				m_fragmentCopyingHead -= IO_CHANK_BYTES;
+			}
 		}
 
-		memcpy( m_uploadPointers[index % 2], (const char*)src + srcPtr, batch );
+		memcpy( (char*)m_fragmentPointer + fragmentTo, (const char*)src + srcPtr, batch );
 		enqueueCommand(
 			[&]( ID3D12GraphicsCommandList* commandList )
 			{
 				commandList->CopyBufferRegion(
 					buffer->d3d12Resource(), dstPtr,
-					m_uploadBuffers[index % 2].get(), 0, batch );
+					m_fragmentBuffer.get(), fragmentTo, batch );
 			} );
-		fence = std::move( createFence() );
+
+		m_fragmentCopyingHead += batch;
+
+		CopyTask task;
+		task.fence = std::shared_ptr<Fence>( newFence() );
+		task.bytes = batch;
+		m_fragmentCopyQueue.push( task );
 
 		reminder -= batch;
 		if( reminder == 0 )
 		{
 			break;
 		}
-
 		dstPtr += batch;
 		srcPtr += batch;
-		index++;
 	}
-	if( fence )
+
+	if( copyMode == CopyMode::PrefferedSync )
 	{
-		fence->wait();
+		while( !m_fragmentCopyQueue.empty() )
+		{
+			CopyTask task = m_fragmentCopyQueue.front();
+			m_fragmentCopyQueue.pop();
+			task.fence->wait();
+		}
+		m_fragmentCopyingTail = 0;
+		m_fragmentCopyingHead = 0;
 	}
 }
+
 void Device::copyD2H( void* dst, Buffer* buffer, int64_t srcOffset, int64_t bytes )
 {
 	DX_ASSERT( srcOffset + bytes <= buffer->bytes(), "" );
@@ -623,7 +658,7 @@ void Device::copyD2H( void* dst, Buffer* buffer, int64_t srcOffset, int64_t byte
 		readbackBytes = batch;
 		readbackDst = dstPtr;
 
-		fence = std::move( createFence() );
+		fence = std::unique_ptr<Fence>( newFence() );
 
 		reminder -= batch;
 		dstPtr += batch;

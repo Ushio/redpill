@@ -205,7 +205,7 @@ int main()
 				.learningRate( 10.0f )
 				.initType( InitializationType::He )
 				.optimType( OptimizerType::Adam )
-				 .activationType( ActivationType::ReLU ) );
+				 .activationType( ActivationType::ReLU ));
 
 	/* gpu estimator */
 	dx::activateDebugLayer();
@@ -284,10 +284,8 @@ int main()
 		Stopwatch sw_estimate;
 		
 		Image2DRGBA8 estimatedImage;
-		// estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
-		// float sEstimate = sw_estimate.elapsed();
-
-		mlpx.copyH2D( &device );
+		//estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
+		//float sEstimate = sw_estimate.elapsed();
 
 		int estimatorWidth = image.width() * previewScale;
 		int estimatorHeight = image.height() * previewScale;
