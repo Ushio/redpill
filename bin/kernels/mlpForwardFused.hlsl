@@ -44,12 +44,14 @@ struct MLPForwardFusedArg
 };
 ConstantBuffer<MLPForwardFusedArg> mlpForwardFusedArg;
 
-// struct MLPEncoding
-// {
-//     int mode;
-//     int frequency_N;
-// };
-// ConstantBuffer<MLPEncoding> mlpEncoding;
+struct MLPEncoding
+{
+    int mode;
+    int frequency_N;
+    int padd0;
+    int padd1;
+};
+ConstantBuffer<MLPEncoding> mlpEncoding;
 
 // #define TENSOR_ROW 8
 
@@ -192,6 +194,7 @@ ConstantBuffer<MLPForwardFusedArg> mlpForwardFusedArg;
 
 #define DISPATCH_CHUNK 8096
 #define TENSOR_ROW 16
+#define PI 3.14159265358979323846f
 
 groupshared float tensor[TENSOR_ROW][64];
 
@@ -217,6 +220,33 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
     }
 
     GroupMemoryBarrierWithGroupSync();
+
+    if( mlpEncoding.mode == 1 ) // frequency
+    {
+        float value[TENSOR_ROW];
+        int yi_local;
+        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        {
+            int outputCol = mlpForwardFusedArg.inputMat.m_col * mlpEncoding.frequency_N * 2;
+            if( localId.x < outputCol )
+            {
+                int xi_src = localId.x / ( mlpEncoding.frequency_N * 2 );
+                int baseEachDim = localId.x % ( mlpEncoding.frequency_N * 2 );
+                int i = baseEachDim / 2;
+                int tri_idx = baseEachDim % 2;
+                float v = tensor[yi_local][xi_src];
+                float k = 2.0f * PI * pow( 2.0f, (float)i );
+                v = sin( k * v + ( tri_idx ? PI * 0.5f : 0.0f ) );
+                value[yi_local] = v;
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        {
+            tensor[yi_local][localId.x] = value[yi_local];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
 
     [unroll(4)]
     for( int i = 0 ; i < mlpForwardFusedArg.nLayer ; i++ )

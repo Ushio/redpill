@@ -34,7 +34,13 @@ namespace rpml
 		int padd1;
 		int padd2;
 	};
-
+	struct MLPEncoding
+	{
+		int mode;
+		int frequency_N;
+		int padd0;
+		int padd1;
+	};
 	#define FUSED 1
 
 	// assume Relu
@@ -152,6 +158,14 @@ namespace rpml
 			m_arg->RWStructured( "inputs", m_inputBuffer.get() );
 			m_arg->RWStructured( "outputs", m_outputBuffer.get() );
 			m_arg->RWStructured( "matBuffer", m_matBuffer.get() );
+
+			MLPEncoding encoding = {};
+			if( m_frequency )
+			{
+				encoding.mode = 1;
+				encoding.frequency_N = m_frequency->m_config.N;
+			}
+			m_arg->Constant( "mlpEncoding", encoding );
 
 			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 8 ), 1 );
 			

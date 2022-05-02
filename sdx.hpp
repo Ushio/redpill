@@ -935,15 +935,7 @@ public:
 			D3D12_CPU_DESCRIPTOR_HANDLE h = _bufferHeap->GetCPUDescriptorHandleForHeapStart();
 			h.ptr += (int64_t)_increment * _uav[var].location;
 
-			try
-			{
-
-				_device->d3d12Device()->CreateUnorderedAccessView( resource->d3d12Resource(), nullptr, &d, h );
-			}
-			catch( ... )
-			{
-				printf( "a" );
-			}
+			_device->d3d12Device()->CreateUnorderedAccessView( resource->d3d12Resource(), nullptr, &d, h );
 		}
 		template <class T>
 		void Constant( const char* var, T value )

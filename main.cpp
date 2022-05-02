@@ -205,7 +205,8 @@ int main()
 				.learningRate( 10.0f )
 				.initType( InitializationType::He )
 				.optimType( OptimizerType::Adam )
-				 .activationType( ActivationType::ReLU ));
+				 .activationType( ActivationType::ReLU )
+				 .encoderType( EncoderType::Frequency ) );
 
 	/* gpu estimator */
 	dx::activateDebugLayer();
@@ -304,7 +305,6 @@ int main()
 			}
 		}
 		mlpx.foward( &device, inUVs, &outColors );
-		float sEstimate = sw_estimate.elapsed();
 
 		for( int yi = 0; yi < estimatorHeight; yi++ )
 		{
@@ -318,14 +318,10 @@ int main()
 					255 );
 			}
 		}
+		float sEstimate = sw_estimate.elapsed();
 
-		Stopwatch sw_upload;
-
-		
 		texture->upload( estimatedImage );
 
-		float sUpload = sw_upload.elapsed();
-		
 		//char name[256];
 		//sprintf( name, "estimated_%03d.png", iterations );
 		//estimatedImage.saveAsPng( name );
@@ -351,7 +347,6 @@ int main()
 		
 		ImGui::Text( "%f s train", sTrained );
 		ImGui::Text( "%f s estimate", sEstimate );
-		ImGui::Text( "%f s upload", sUpload );
 		
 		if( ImGui::Button( "save full" ) )
 		{
