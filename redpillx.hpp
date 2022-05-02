@@ -38,7 +38,12 @@ namespace rpml
 	{
 		int mode;
 		int frequency_N;
-		int padd0;
+		int grid_L;
+		int grid_T;
+
+		int grid_F;
+		int grid_Nmin;
+		float grid_b;
 		int padd1;
 	};
 	#define FUSED 1
@@ -57,6 +62,15 @@ namespace rpml
 				if( f )
 				{
 					m_frequency = f;
+				}
+
+				auto g = dynamic_cast<const MultiResolutionHashEncoder*>( mlp.m_layers[0].get() );
+				if( g )
+				{
+					m_grid = g;
+
+					int bytesPerTable = g->m_config.T * g->m_config.F * sizeof( float );
+					m_gridBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, bytesPerTable * g->m_config.L, "Grid Buffer" ) );
 				}
 			}
 
@@ -106,6 +120,19 @@ namespace rpml
 			{
 				device->copyH2D( m_matBuffer.get(), m_affineLayers[i]->m_W.data(), m_Ws[i].m_location * sizeof( float ), m_affineLayers[i]->m_W.bytes(), dx::Device::CopyMode::PrefferedEnqueue );
 				device->copyH2D( m_matBuffer.get(), m_affineLayers[i]->m_b.data(), m_Bs[i].m_location * sizeof( float ), m_affineLayers[i]->m_b.bytes(), dx::Device::CopyMode::PrefferedEnqueue );
+			}
+			if( m_grid )
+			{
+				for( int li = 0; li < m_grid->m_config.L; ++li )
+				{
+					const Mat &feature = m_grid->m_features[li];
+					int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * li;
+					for( int fi = 0; fi < m_grid->m_config.F; ++fi )
+					{
+						int bytesPerFeature = m_grid->m_config.T * sizeof( float );
+						device->copyH2D( m_gridBuffer.get(), &feature( fi, 0 ), baseLevel + bytesPerFeature * fi, bytesPerFeature, dx::Device::CopyMode::PrefferedEnqueue );
+					}
+				}
 			}
 #if FUSED
 			int row = input.row();
@@ -166,6 +193,16 @@ namespace rpml
 			{
 				encoding.mode = 1;
 				encoding.frequency_N = m_frequency->m_config.N;
+			}
+			if( m_grid )
+			{
+				encoding.mode = 2;
+				encoding.grid_L = m_grid->m_config.L;
+				encoding.grid_T = m_grid->m_config.T;
+				encoding.grid_F = m_grid->m_config.F;
+				encoding.grid_Nmin = m_grid->m_config.Nmin;
+				encoding.grid_b = m_grid->m_config.b;
+				m_arg->RWStructured( "gridFeature", m_gridBuffer.get() );
 			}
 			m_arg->Constant( "mlpEncoding", encoding );
 
@@ -255,7 +292,10 @@ namespace rpml
 		std::vector<GPUMat> m_Bs;
 		
 		const FrequencyEncoder* m_frequency = 0;
+		const MultiResolutionHashEncoder* m_grid = 0;
 		std::vector<const AffineLayer*> m_affineLayers;
+
+		std::unique_ptr<dx::Buffer> m_gridBuffer;
 
 		std::unique_ptr<dx::Shader> m_forwardShader;
 		std::unique_ptr<dx::Shader::Argument> m_arg;

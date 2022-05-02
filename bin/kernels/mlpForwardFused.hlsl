@@ -48,10 +48,17 @@ struct MLPEncoding
 {
     int mode;
     int frequency_N;
-    int padd0;
+    int grid_L;
+    int grid_T;
+
+    int grid_F;
+    int grid_Nmin;
+    float grid_b;
     int padd1;
 };
 ConstantBuffer<MLPEncoding> mlpEncoding;
+
+RWStructuredBuffer<float> gridFeature;
 
 // #define TENSOR_ROW 8
 
@@ -196,6 +203,69 @@ ConstantBuffer<MLPEncoding> mlpEncoding;
 #define TENSOR_ROW 16
 #define PI 3.14159265358979323846f
 
+#define GRID_MAX_FEATURE 4
+#define GRID_MAX_INPUT_DIM 4
+
+static const uint PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+
+class DimensionHasher
+{
+    uint m_h;
+    void init()
+    {
+        m_h = 0;
+    }
+    void add( uint xs, int d )
+    {
+        m_h ^= xs * PRIMES[ min( d, 6 ) ];
+    }
+    uint value() { return m_h; }
+};
+
+struct HashGridEvaluator
+{
+    int m_dim;
+    uint m_bits;
+    void init( int dim )
+    {
+        m_dim = dim;
+        m_bits = 0xFFFFFFFF;
+    }
+    bool moveNext()
+    {
+        m_bits++;
+        return m_bits < ( 1U << m_dim );
+    }
+    void evaluate( out float weight, out uint hashValue, int resolution, float input[GRID_MAX_INPUT_DIM] )
+    {
+        DimensionHasher hasher;
+        hasher.init();
+
+        float w = 1.0f;
+        for( int d = 0; d < m_dim; ++d )
+        {
+            float x_in = input[ min( d, GRID_MAX_INPUT_DIM - 1 ) ];
+
+            float xf = x_in * resolution;
+            uint xi = xf;
+            float u = xf - xi;
+
+            if( m_bits & ( 1U << d ) )
+            {
+                w *= u;
+                hasher.add( xi + 1, d );
+            }
+            else
+            {
+                w *= 1.0f - u;
+                hasher.add( xi, d );
+            }
+        }
+        weight = w;
+        hashValue = hasher.value();
+    }
+};
+
 // groupshared float tensor[TENSOR_ROW][64];
 groupshared float tensor[64 * TENSOR_ROW];
 
@@ -265,6 +335,65 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
             }
         }
         GroupMemoryBarrierWithGroupSync();
+    }
+    if( mlpEncoding.mode == 2 ) // Multi Resolution Hash
+    {
+        int nTasks = TENSOR_ROW * mlpEncoding.grid_L;
+        int nIter = div_round_up( nTasks, 64 );
+        int dim = mlpForwardFusedArg.inputMat.m_col;
+        
+        for( int iIter = 0 ; iIter < nIter ; iIter++ )
+        {
+            // each local item is in charge of handle a level of a row
+            // (yi=0,lv=0), (yi=0,lv=1).. (yi=0,lv=15), (yi=1,lv=0), (yi=1,lv=1)...
+            int i = iIter * 64 + localId.x;
+            int yi_local = i / mlpEncoding.grid_L;
+            int level    = i % mlpEncoding.grid_L;
+            float res = floor( mlpEncoding.grid_Nmin * pow( mlpEncoding.grid_b, level ) );
+            int elementsPerTable = mlpEncoding.grid_T * mlpEncoding.grid_F;
+            int baseLevel = elementsPerTable * level;
+
+            float input[GRID_MAX_INPUT_DIM];
+            for( int xi = 0 ; xi < GRID_MAX_INPUT_DIM ; xi++ )
+            {
+                input[xi] = getTensor( xi, yi_local );
+            }
+            
+            float featureVector[GRID_MAX_FEATURE];
+            for( int fi = 0 ; fi < GRID_MAX_FEATURE ; fi++ )
+            {
+                featureVector[fi] = 0.0f;
+            }
+
+            if( yi_local < TENSOR_ROW )
+            {
+                HashGridEvaluator evaluator;
+                evaluator.init( dim );
+                while( evaluator.moveNext() )
+                {
+                    float w;
+                    uint h;
+                    evaluator.evaluate( w, h, res, input );
+                    uint index = h % mlpEncoding.grid_T;
+                    int elementsPerFeature = mlpEncoding.grid_T;
+                    for( int fdim = 0; fdim < mlpEncoding.grid_F; fdim++ )
+                    {
+                        float f = gridFeature[baseLevel + elementsPerFeature * fdim + index];
+                        featureVector[fdim] += w * f;
+                    }
+                }
+            }
+            GroupMemoryBarrierWithGroupSync();
+            if( yi_local < TENSOR_ROW )
+            {
+                // each thread has features. so write it down.
+                for( int fdim = 0; fdim < mlpEncoding.grid_F; fdim++ )
+                {
+                    setTensor( level * mlpEncoding.grid_F + fdim , yi_local, featureVector[fdim] );
+                }
+            }
+            GroupMemoryBarrierWithGroupSync();
+        }
     }
 
     for( int i = 0 ; i < mlpForwardFusedArg.nLayer ; i++ )

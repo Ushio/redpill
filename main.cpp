@@ -192,21 +192,21 @@ int main()
 
 	ITexture *texture = CreateTexture();
 
-	//MLP mlp( MLPConfig()
-	//			 .shape( { 2, 64, 64, 3 } )
-	//			 .learningRate( 10.0f )
-	//			 .initType( InitializationType::He )
-	//			 .optimType( OptimizerType::Adam )
-	//			 .activationType( ActivationType::ReLU )
-	//			 .encoderType( EncoderType::MultiResolutionHash ) );
-
 	MLP mlp( MLPConfig()
 				 .shape( { 2, 64, 64, 3 } )
-				.learningRate( 10.0f )
-				.initType( InitializationType::He )
-				.optimType( OptimizerType::Adam )
+				 .learningRate( 10.0f )
+				 .initType( InitializationType::He )
+				 .optimType( OptimizerType::Adam )
 				 .activationType( ActivationType::ReLU )
-				 .encoderType( EncoderType::Frequency ) );
+				 .encoderType( EncoderType::MultiResolutionHash ) );
+
+	//MLP mlp( MLPConfig()
+	//			 .shape( { 2, 64, 64, 3 } )
+	//			.learningRate( 10.0f )
+	//			.initType( InitializationType::He )
+	//			.optimType( OptimizerType::Adam )
+	//			 .activationType( ActivationType::ReLU )
+	//			 .encoderType( EncoderType::Frequency ) );
 
 	/* gpu estimator */
 	// dx::activateDebugLayer();
