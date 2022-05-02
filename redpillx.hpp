@@ -50,7 +50,7 @@ namespace rpml
 				auto f = dynamic_cast<const FrequencyEncoder*>( mlp.m_layers[0].get() );
 				if( f )
 				{
-
+					m_frequency = f;
 				}
 			}
 
@@ -149,7 +149,9 @@ namespace rpml
 			m_arg->RWStructured( "matBuffer", m_matBuffer.get() );
 
 			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 8 ), 1 );
-			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
+			
+			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
+			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, div_round_up( row, DISPATCH_CHUNK ) );
 
 			output->setShape( outputGPU.m_row, outputGPU.m_col );
 			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
@@ -217,7 +219,10 @@ namespace rpml
 		std::vector<char> m_matBufferSrc;
 		std::vector<GPUMat> m_Ws;
 		std::vector<GPUMat> m_Bs;
+		
+		const FrequencyEncoder* m_frequency = 0;
 		std::vector<const AffineLayer*> m_affineLayers;
+
 		std::unique_ptr<dx::Shader> m_forwardShader;
 		std::unique_ptr<dx::Shader::Argument> m_arg;
 	};
