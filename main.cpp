@@ -209,7 +209,7 @@ int main()
 				 .encoderType( EncoderType::Frequency ) );
 
 	/* gpu estimator */
-	dx::activateDebugLayer();
+	// dx::activateDebugLayer();
 	auto adapters = dx::allAdapters();
 	dx::Device device( adapters[0] );
 
@@ -282,9 +282,9 @@ int main()
 		}
 		float sTrained = sw_train.elapsed();
 
-		Stopwatch sw_estimate;
 		
-		Image2DRGBA8 estimatedImage;
+		Stopwatch sw_estimate;
+		static Image2DRGBA8 estimatedImage;
 		//estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
 		//float sEstimate = sw_estimate.elapsed();
 

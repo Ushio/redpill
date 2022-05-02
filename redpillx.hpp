@@ -119,8 +119,8 @@ namespace rpml
 			{
 				m_inputBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, input.bytes(), "Input Mat" ) );
 			}
-
-			device->copyH2D( m_inputBuffer.get(), input.data(), 0, input.bytes() );
+			
+			device->copyH2D( m_inputBuffer.get(), input.data(), 0, input.bytes(), dx::Device::CopyMode::PrefferedEnqueue );
 
 			GPUMat outputGPU;
 			outputGPU.m_location = 0;
