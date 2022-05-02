@@ -139,7 +139,12 @@ namespace rpml
 
 			// workaround for D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION
 #define DISPATCH_CHUNK 8096
-			int numberOfBlock = div_round_up( row, 8 );
+			//int numberOfBlock = div_round_up( row, 8 );
+			//int numberOfChunk = div_round_up( numberOfBlock, DISPATCH_CHUNK );
+			//arg.nBlock = numberOfBlock;
+
+#define TENSOR_ROW 16
+			int numberOfBlock = div_round_up( row, TENSOR_ROW );
 			int numberOfChunk = div_round_up( numberOfBlock, DISPATCH_CHUNK );
 			arg.nBlock = numberOfBlock;
 
@@ -151,7 +156,10 @@ namespace rpml
 			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 8 ), 1 );
 			
 			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
-			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, div_round_up( row, DISPATCH_CHUNK ) );
+			
+			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, div_round_up( row, DISPATCH_CHUNK ) );
+
+			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
 
 			output->setShape( outputGPU.m_row, outputGPU.m_col );
 			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
