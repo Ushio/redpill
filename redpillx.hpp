@@ -97,6 +97,8 @@ namespace rpml
 			m_forwardShader = std::unique_ptr<dx::Shader>( new dx::Shader( device, ( kernels + "\\mlpForward.hlsl" ).c_str(), kernels.c_str(), dx::CompileMode::Release ) );
 			#endif
 			m_arg = std::unique_ptr<dx::Shader::Argument>( m_forwardShader->newArgument( device ) );
+
+			m_stopwatch = std::unique_ptr<dx::DeviceStopwatch>( new dx::DeviceStopwatch( device, 1024, true ) );
 		}
 		void foward( dx::Device* device, const Mat& input, Mat *output )
 		{
@@ -167,6 +169,8 @@ namespace rpml
 			}
 			m_arg->Constant( "mlpEncoding", encoding );
 
+			m_stopwatch->begin( "forwardShader" );
+
 			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 8 ), 1 );
 			
 			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
@@ -175,8 +179,16 @@ namespace rpml
 
 			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
 
+			m_stopwatch->end();
+
 			output->setShape( outputGPU.m_row, outputGPU.m_col );
+
+			m_stopwatch->begin( "readback" );
 			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
+			m_stopwatch->end();
+
+			m_stopwatch->collect();
+			// printf( "forwardShader: %.5f ms, readback: %.5f ms\n", m_stopwatch->ms( "forwardShader" ), m_stopwatch->ms( "readback" ) );
 #else
 			int row = input.row();
 			int paddedRow = input.paddedRow();
@@ -247,5 +259,7 @@ namespace rpml
 
 		std::unique_ptr<dx::Shader> m_forwardShader;
 		std::unique_ptr<dx::Shader::Argument> m_arg;
+
+		std::unique_ptr<dx::DeviceStopwatch> m_stopwatch;
 	};
 }

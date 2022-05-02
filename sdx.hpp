@@ -339,7 +339,6 @@ public:
 		}
 		m_readbackBuffers[0]->SetName( L"m_readbackBuffers[0]" );
 		m_readbackBuffers[1]->SetName( L"m_readbackBuffers[1]" );
-
 	}
 	~Device()
 	{
@@ -352,6 +351,13 @@ public:
 	ID3D12CommandQueue* d3d12Queue()
 	{
 		return m_queue.get();
+	}
+
+	// https://docs.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12device-setstablepowerstate
+	void setStablePowerState( bool enabled )
+	{
+		HRESULT hr = m_device->SetStablePowerState( enabled );
+		DX_ASSERT( hr == S_OK, "" );
 	}
 
 	void present()
@@ -444,6 +450,141 @@ private:
 
 	DxPtr<ID3D12Resource> m_readbackBuffers[2];
 	void* m_readbackPointers[2];
+};
+
+class DeviceStopwatch
+{
+public:
+	DeviceStopwatch( Device* device, int capacity, bool enableStopwatch = true ) : m_device( device ), m_capacity( capacity ), m_enableStopwatch( enableStopwatch ), m_readbackPtr( 0 )
+	{
+		if( m_enableStopwatch == false )
+			return;
+
+		HRESULT hr;
+		
+		D3D12_QUERY_HEAP_DESC desc = {};
+		desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+		desc.Count = capacity;
+		hr = device->d3d12Device()->CreateQueryHeap( &desc, IID_PPV_ARGS( m_queryHeap.getAddressOf() ) );
+		DX_ASSERT( hr == S_OK, "" );
+
+		hr = device->d3d12Device()->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
+			D3D12_HEAP_FLAG_NONE,
+			&CD3DX12_RESOURCE_DESC::Buffer( sizeof( uint64_t ) * m_capacity ),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			nullptr,
+			IID_PPV_ARGS( m_readbackBuffer.getAddressOf() ) );
+		DX_ASSERT( hr == S_OK, "" );
+
+		D3D12_RANGE range = {};
+		hr = m_readbackBuffer->Map( 0, &range, &m_readbackPtr );
+		DX_ASSERT( hr == S_OK, "" );
+	}
+	void begin( const char* format, ... )
+	{
+		if( m_enableStopwatch == false )
+			return;
+
+		va_list ap;
+		va_start( ap, format );
+		char text[256];
+		int bytes = vsnprintf( text, sizeof( text ), format, ap );
+		va_end( ap );
+		m_label = text;
+
+		if( m_records.count( m_label ) == 0 )
+		{
+			m_records[m_label].begin = m_locationIndexer++;
+			m_records[m_label].end   = m_locationIndexer++;
+		}
+
+		m_device->enqueueCommand(
+			[&]( ID3D12GraphicsCommandList* commandList )
+			{
+				commandList->EndQuery( m_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, m_records[m_label].begin );
+			} );
+	}
+	void end()
+	{
+		if( m_enableStopwatch == false )
+			return;
+
+		DX_ASSERT( m_records.count( m_label ), "" );
+
+		m_device->enqueueCommand(
+			[&]( ID3D12GraphicsCommandList* commandList )
+			{
+				commandList->EndQuery( m_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, m_records[m_label].end );
+			} );
+
+		m_label = "";
+	}
+	void collect() 
+	{
+		if( m_enableStopwatch == false )
+			return;
+
+		m_device->enqueueCommand(
+			[&]( ID3D12GraphicsCommandList* commandList )
+			{
+				commandList->ResolveQueryData( m_queryHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, m_locationIndexer, m_readbackBuffer.get(), 0 );
+			} );
+
+		std::unique_ptr<Fence> fence( m_device->newFence() );
+		fence->wait();
+
+		uint64_t freq = 1;
+		HRESULT hr;
+		hr = m_device->d3d12Queue()->GetTimestampFrequency( &freq );
+		DX_ASSERT( hr == S_OK, "" );
+
+		const uint64_t* timestamps = (const uint64_t *)m_readbackPtr;
+
+		for( auto it = m_records.begin(); it != m_records.end() ; ++it )
+		{
+			uint64_t b = timestamps[it->second.begin];
+			uint64_t e = timestamps[it->second.end];
+			uint64_t deltaTime = e - b;
+			double durationS = (double)deltaTime / (double)freq;
+			it->second.durationMS = durationS * 1000.0;
+		}
+	}
+
+	double ms( const char* format, ... ) const 
+	{
+		if( m_enableStopwatch == false )
+			return 0.0;
+
+		va_list ap;
+		va_start( ap, format );
+		char text[256];
+		int bytes = vsnprintf( text, sizeof( text ), format, ap );
+		va_end( ap );
+
+		DX_ASSERT( m_records.count( text ), "" );
+
+		auto it = m_records.find( text );
+		return it->second.durationMS;
+	}
+private:
+	Device* m_device;
+	int m_capacity;
+	bool m_enableStopwatch;
+	DxPtr<ID3D12QueryHeap> m_queryHeap;
+	DxPtr<ID3D12Resource> m_readbackBuffer;
+	void* m_readbackPtr;
+
+	int m_locationIndexer = 0;
+	std::string m_label;
+
+	struct Record
+	{
+		int begin = 0;
+		int end = 0;
+		double durationMS = 0.0;
+	};
+	std::map<std::string, Record> m_records;
 };
 
 /*

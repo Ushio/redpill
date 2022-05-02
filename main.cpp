@@ -213,6 +213,9 @@ int main()
 	auto adapters = dx::allAdapters();
 	dx::Device device( adapters[0] );
 
+	// please check developer mode setting.
+	// device.setStablePowerState( true );
+
 	MLP_GPU_Forward mlpx( &device, mlp, pr::GetDataPath("kernels") );
 
 	//dx::Shader shader( &device, pr::GetDataPath( "src/hello.hlsl" ).c_str(), pr::GetDataPath( "src/" ).c_str(), dx::CompileMode::Release );
