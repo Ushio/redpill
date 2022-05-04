@@ -203,7 +203,6 @@ RWStructuredBuffer<float> gridFeature;
 #define TENSOR_ROW 16
 #define PI 3.14159265358979323846f
 
-#define GRID_MAX_FEATURE 4
 #define GRID_MAX_INPUT_DIM 4
 
 static const uint PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
@@ -282,6 +281,8 @@ void setTensor( int xi, int yi, float value )
 [numthreads(64, 1, 1)]
 void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID )
 {
+    float value[TENSOR_ROW];
+
 	threadId.y = threadId.y + threadId.z * DISPATCH_CHUNK;
     if( mlpForwardFusedArg.nBlock <= threadId.y )
     {
@@ -291,7 +292,6 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
     int xi = localId.x;
     if( xi < mlpForwardFusedArg.inputMat.m_col )
     {
-        float value[TENSOR_ROW];
         int yi_local;
         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
@@ -308,7 +308,6 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
 
     if( mlpEncoding.mode == 1 ) // frequency
     {
-        float value[TENSOR_ROW];
         int yi_local;
         int outputCol = mlpForwardFusedArg.inputMat.m_col * mlpEncoding.frequency_N * 2;
 
@@ -352,18 +351,19 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
             float res = floor( mlpEncoding.grid_Nmin * pow( mlpEncoding.grid_b, level ) );
             int elementsPerTable = mlpEncoding.grid_T * mlpEncoding.grid_F;
             int baseLevel = elementsPerTable * level;
-
             float input[GRID_MAX_INPUT_DIM];
             for( int xi = 0 ; xi < GRID_MAX_INPUT_DIM ; xi++ )
             {
                 input[xi] = getTensor( xi, yi_local );
             }
-            
-            float featureVector[GRID_MAX_FEATURE];
-            for( int fi = 0 ; fi < GRID_MAX_FEATURE ; fi++ )
+            GroupMemoryBarrierWithGroupSync();
+
+            // all inputs have been loaded. so clear all target feature vector.
+            for( int fdim = 0; fdim < mlpEncoding.grid_F; fdim++ )
             {
-                featureVector[fi] = 0.0f;
+                setTensor( level * mlpEncoding.grid_F + fdim, yi_local, 0.0f );
             }
+            GroupMemoryBarrierWithGroupSync();
 
             if( yi_local < TENSOR_ROW )
             {
@@ -379,29 +379,19 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
                     for( int fdim = 0; fdim < mlpEncoding.grid_F; fdim++ )
                     {
                         float f = gridFeature[baseLevel + elementsPerFeature * fdim + index];
-                        featureVector[fdim] += w * f;
+                        float v = getTensor( level * mlpEncoding.grid_F + fdim, yi_local );
+                        setTensor( level * mlpEncoding.grid_F + fdim, yi_local, v + w * f );
                     }
                 }
             }
-            GroupMemoryBarrierWithGroupSync();
-            if( yi_local < TENSOR_ROW )
-            {
-                // each thread has features. so write it down.
-                for( int fdim = 0; fdim < mlpEncoding.grid_F; fdim++ )
-                {
-                    setTensor( level * mlpEncoding.grid_F + fdim , yi_local, featureVector[fdim] );
-                }
-            }
-            GroupMemoryBarrierWithGroupSync();
         }
+        GroupMemoryBarrierWithGroupSync();
     }
-
     for( int i = 0 ; i < mlpForwardFusedArg.nLayer ; i++ )
     {
         int row = mlpForwardFusedArg.m_Ws[i].m_row; // input
         int col = mlpForwardFusedArg.m_Ws[i].m_col; // output
 
-        float value[TENSOR_ROW];
         {
             for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
             {
@@ -444,7 +434,6 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
 
     if( xi < mlpForwardFusedArg.outputMat.m_col )
     {
-        float value[TENSOR_ROW];
         int yi_local;
         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
