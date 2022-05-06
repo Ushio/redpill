@@ -265,7 +265,6 @@ struct HashGridEvaluator
     }
 };
 
-// groupshared float tensor[TENSOR_ROW][64];
 groupshared float tensor[64 * TENSOR_ROW];
 
 // column major for ds_read_b128
@@ -450,3 +449,204 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
         }
     }
 }
+
+// HALF ver
+// #define DISPATCH_CHUNK 8096
+// #define TENSOR_ROW 32
+// #define PI 3.14159265358979323846f
+
+// #define GRID_MAX_INPUT_DIM 4
+
+// static const uint PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+
+// class DimensionHasher
+// {
+//     uint m_h;
+//     void init()
+//     {
+//         m_h = 0;
+//     }
+//     void add( uint xs, int d )
+//     {
+//         m_h ^= xs * PRIMES[ min( d, 6 ) ];
+//     }
+//     uint value() { return m_h; }
+// };
+
+// struct HashGridEvaluator
+// {
+//     int m_dim;
+//     uint m_bits;
+//     void init( int dim )
+//     {
+//         m_dim = dim;
+//         m_bits = 0xFFFFFFFF;
+//     }
+//     bool moveNext()
+//     {
+//         m_bits++;
+//         return m_bits < ( 1U << m_dim );
+//     }
+//     void evaluate( out float weight, out uint hashValue, int resolution, float input[GRID_MAX_INPUT_DIM] )
+//     {
+//         DimensionHasher hasher;
+//         hasher.init();
+
+//         float w = 1.0f;
+//         for( int d = 0; d < m_dim; ++d )
+//         {
+//             float x_in = input[ min( d, GRID_MAX_INPUT_DIM - 1 ) ];
+
+//             float xf = x_in * resolution;
+//             uint xi = xf;
+//             float u = xf - xi;
+
+//             if( m_bits & ( 1U << d ) )
+//             {
+//                 w *= u;
+//                 hasher.add( xi + 1, d );
+//             }
+//             else
+//             {
+//                 w *= 1.0f - u;
+//                 hasher.add( xi, d );
+//             }
+//         }
+//         weight = w;
+//         hashValue = hasher.value();
+//     }
+// };
+
+// groupshared uint tensor[64 * TENSOR_ROW / 2];
+
+// // column major for ds_read_b128
+// min16float getTensor( int xi, int yi )
+// {
+//     uint v = tensor[xi * TENSOR_ROW / 2 + yi / 2];
+//     if( ( yi % 2 ) != 0 )
+//     {
+//         v = v >> 16;
+//     }
+//     return f16tof32( v );
+// }
+// void setTensor( int xi, int yi, min16float value )
+// {
+//     uint fp16 = f32tof16( value );
+//     uint v = tensor[xi * TENSOR_ROW / 2 + yi / 2];
+//     if( ( yi % 2 ) != 0 )
+//     {
+//         tensor[xi * TENSOR_ROW / 2 + yi / 2] = ( v & 0x0000FFFF ) | ( fp16 << 16 );
+//     }
+//     else
+//     {
+//         tensor[xi * TENSOR_ROW / 2 + yi / 2] = ( v & 0xFFFF0000 ) | fp16;
+//     }
+// }
+
+// [numthreads(64, 1, 1)]
+// void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID )
+// {
+// 	threadId.y = threadId.y + threadId.z * DISPATCH_CHUNK;
+//     if( mlpForwardFusedArg.nBlock <= threadId.y )
+//     {
+//         return;
+//     }
+
+//     int xi = localId.x;
+//     if( xi < mlpForwardFusedArg.inputMat.m_col )
+//     {
+//         uint value[TENSOR_ROW / 2];
+
+//         int yi_local;
+//         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 2 )
+//         {
+//             int yi_0 = threadId.y * TENSOR_ROW + yi_local;
+//             int yi_1 = threadId.y * TENSOR_ROW + yi_local + 1;
+//             float v0 = yi_0 < mlpForwardFusedArg.inputMat.m_row ? getElem( xi, yi_0, inputs, mlpForwardFusedArg.inputMat ) : 0.0f;
+//             float v1 = yi_1 < mlpForwardFusedArg.inputMat.m_row ? getElem( xi, yi_1, inputs, mlpForwardFusedArg.inputMat ) : 0.0f;
+//             value[yi_local / 2] = f32tof16( v0 ) | ( f32tof16( v1 ) << 16 );
+//         }
+//         for( yi_local = 0 ; yi_local < TENSOR_ROW / 2 ; yi_local++ )
+//         {
+//             tensor[xi * TENSOR_ROW / 2 + yi_local] = value[yi_local]; // ds_write_B128
+//         }
+//     }
+
+//     GroupMemoryBarrierWithGroupSync();
+
+//     for( int i = 0 ; i < mlpForwardFusedArg.nLayer ; i++ )
+//     {
+//         int row = mlpForwardFusedArg.m_Ws[i].m_row; // input
+//         int col = mlpForwardFusedArg.m_Ws[i].m_col; // output
+
+//         uint value[TENSOR_ROW/2];
+//         {
+//             for( int yi_local = 0 ; yi_local < TENSOR_ROW/2 ; yi_local++ )
+//             {
+//                 value[yi_local] = 0;
+//             }
+//         }
+        
+//         if( xi < col )
+//         {
+//             for( int j = 0 ; j < row ; j++ ) 
+//             {
+//                 min16float  b = getElem( xi /* output xi */, j, matBuffer, mlpForwardFusedArg.m_Ws[i] );
+//                 min16float2 bb = min16float2( b, b );
+//                 for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 2 )
+//                 {
+//                     uint a = tensor[j * TENSOR_ROW / 2 + yi_local / 2];
+//                     uint c = value[yi_local / 2];
+//                     min16float2 cc = min16float2( (min16float)f16tof32( c ), (min16float)f16tof32( c >> 16 ) );
+//                     min16float2 aa = min16float2( (min16float)f16tof32( a ), (min16float)f16tof32( a >> 16 ) );
+//                     cc += aa * bb;
+//                     uint2 ccii = f32tof16( float2( cc.x, cc.y ) );
+//                     value[yi_local / 2] = ccii.x | ( ccii.y << 16 );
+//                 }
+//             }
+            
+//             min16float bias = getElem( xi, 0, matBuffer, mlpForwardFusedArg.m_Bs[i] );
+
+//             min16float2 relu_lower2 = i + 1 != mlpForwardFusedArg.nLayer ? min16float2( 0.0h, 0.0h ) : min16float2( -65504.f, -65504.f );
+//             for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 2 )
+//             {
+//                 uint c = value[yi_local / 2];
+//                 min16float2 cc = min16float2( (min16float)f16tof32( c ), (min16float)f16tof32( c >> 16 ) );
+//                 cc += min16float2( bias, bias );
+//                 cc = max( cc, relu_lower2 );
+//                 uint2 ccii = f32tof16( float2( cc.x, cc.y ) );
+//                 value[yi_local / 2] = ccii.x | ( ccii.y << 16 );
+//             }
+//         }
+//         GroupMemoryBarrierWithGroupSync();
+//         if( xi < col )
+//         {
+//             for( int yi_local = 0 ; yi_local < TENSOR_ROW / 2 ; yi_local++ )
+//             {
+//                 tensor[xi * TENSOR_ROW / 2 + yi_local] = value[yi_local];
+//             }
+//         }
+//         GroupMemoryBarrierWithGroupSync();
+//     }
+
+//     if( xi < mlpForwardFusedArg.outputMat.m_col )
+//     {
+//         int yi_local;
+//         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 2 )
+//         {
+//             uint v = tensor[xi * TENSOR_ROW / 2 + yi_local / 2];
+//             int yi_0 = threadId.y * TENSOR_ROW + yi_local;
+//             int yi_1 = threadId.y * TENSOR_ROW + yi_local + 1;
+//             float v0 = f16tof32( v );
+//             float v1 = f16tof32( v >> 16 );
+//             if( yi_0 < mlpForwardFusedArg.outputMat.m_row )
+//             {
+//                 setElem( xi, yi_0, outputs, mlpForwardFusedArg.outputMat, v0 );
+//             }
+//             if( yi_1 < mlpForwardFusedArg.outputMat.m_row )
+//             {
+//                 setElem( xi, yi_1, outputs, mlpForwardFusedArg.outputMat, v1 );
+//             }
+//         }
+//     }
+// }
