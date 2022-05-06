@@ -220,12 +220,10 @@ namespace rpml
 
 			output->setShape( outputGPU.m_row, outputGPU.m_col );
 
-			m_stopwatch->begin( "readback" );
 			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
-			m_stopwatch->end();
 
 			m_stopwatch->collect();
-			// printf( "forwardShader: %.5f ms, readback: %.5f ms\n", m_stopwatch->ms( "forwardShader" ), m_stopwatch->ms( "readback" ) );
+			// printf( "forwardShader: %.5f ms\n", m_stopwatch->ms( "forwardShader" ) );
 #else
 			int row = input.row();
 			int paddedRow = input.paddedRow();
