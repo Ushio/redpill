@@ -1540,6 +1540,10 @@ namespace rpml
 			g.addElements( nElement );
 			m_pool.enqueueFor( nElement, taskGranularity, [&]( int64_t beg, int64_t end )
 			{
+#if ENABLE_TRACE
+				pr::ChromeTraceTimer tr( pr::ChromeTraceTimer::AddMode::Auto );
+				tr.label( "forward task" );
+#endif
 				std::shared_ptr<LocalStorage> localStorage = acquireLocalStorage();
 				localStorage->layerContexts.resize( m_layers.size() );
 
