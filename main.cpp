@@ -112,7 +112,7 @@ void print( const Mat& m )
     }
 }
 
-void estimate( pr::Image2DRGBA8 *image, MLP& mlp, int width, int height )
+double estimate( pr::Image2DRGBA8* image, MLP& mlp, int width, int height )
 {
 	static Mat inUVs;
 	static Mat outPixels;
@@ -130,7 +130,11 @@ void estimate( pr::Image2DRGBA8 *image, MLP& mlp, int width, int height )
 		}
 	}
 
+	pr::Stopwatch sw_estimate;
+
 	mlp.forwardMT( &outPixels, inUVs );
+
+	double elapsedForward = sw_estimate.elapsed();
 
 	for( int yi = 0; yi < height; yi++ )
 	{
@@ -144,6 +148,7 @@ void estimate( pr::Image2DRGBA8 *image, MLP& mlp, int width, int height )
 				255 );
 		}
 	}
+	return elapsedForward;
 }
 
 #if 1
@@ -286,11 +291,10 @@ int main()
 		float sTrained = sw_train.elapsed();
 
 		
-		Stopwatch sw_estimate;
 		static Image2DRGBA8 estimatedImage;
-		//estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
-		//float sEstimate = sw_estimate.elapsed();
+		//float sEstimate = estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
 
+		Stopwatch sw_estimate;
 		int estimatorWidth = image.width() * previewScale;
 		int estimatorHeight = image.height() * previewScale;
 		static Mat inUVs;
