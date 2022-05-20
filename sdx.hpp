@@ -984,6 +984,13 @@ public:
 				_uav[bind.Name].stride = bind.NumSamples; // https://docs.microsoft.com/en-us/windows/win32/api/d3d12shader/ns-d3d12shader-d3d12_shader_input_bind_desc
 				break;
 			}
+			case D3D_SIT_UAV_RWBYTEADDRESS:
+			{
+				range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+				_uav[bind.Name].location = i;
+				_uav[bind.Name].stride = 1;
+				break;
+			}
 			default:
 				DX_ASSERT( 0, "" );
 			}

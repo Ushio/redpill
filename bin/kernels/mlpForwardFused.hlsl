@@ -13,6 +13,26 @@ void setElem( int x, int y, RWStructuredBuffer<float> buffer, GPUMat mat, float 
 {
     buffer[mat.m_location + mat.m_paddedRow * x + y] = v;
 }
+float getElem( int x, int y, RWByteAddressBuffer buffer, GPUMat mat )
+{
+    int index = mat.m_location + mat.m_paddedRow * x + y;
+    return asfloat( buffer.Load( index * 4 ) );
+}
+float4 getElem4( int x, int y, RWByteAddressBuffer buffer, GPUMat mat )
+{
+    int index = mat.m_location + mat.m_paddedRow * x + y;
+    return asfloat( buffer.Load4( index * 4 ) );
+}
+void setElem( int x, int y, RWByteAddressBuffer buffer, GPUMat mat, float v )
+{
+    int index = mat.m_location + mat.m_paddedRow * x + y;
+    buffer.Store( index * 4, asuint( v ) );
+}
+void setElem4( int x, int y, RWByteAddressBuffer buffer, GPUMat mat, float4 v )
+{
+    int index = mat.m_location + mat.m_paddedRow * x + y;
+    buffer.Store4( index * 4, asuint( v ) );
+}
 
 float relu( float x ) 
 {
@@ -27,9 +47,9 @@ inline int next_multiple( int val, int divisor )
     return div_round_up( val, divisor ) * divisor;
 }
 
-RWStructuredBuffer<float> inputs;
-RWStructuredBuffer<float> outputs;
-RWStructuredBuffer<float> matBuffer;
+RWByteAddressBuffer inputs;
+RWByteAddressBuffer outputs;
+RWByteAddressBuffer matBuffer;
 
 struct MLPForwardFusedArg
 {
@@ -292,10 +312,14 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
     if( xi < mlpForwardFusedArg.inputMat.m_col )
     {
         int yi_local;
-        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 4 )
         {
             int yi = threadId.y * TENSOR_ROW + yi_local;
-            value[yi_local] = yi < mlpForwardFusedArg.inputMat.m_row ? getElem( xi, yi, inputs, mlpForwardFusedArg.inputMat ) : 0.0f;
+            float4 v = yi < mlpForwardFusedArg.inputMat.m_row ? getElem4( xi, yi, inputs, mlpForwardFusedArg.inputMat ) : 0.0f;
+            for(int k = 0 ; k < 4 ; k++)
+            {
+                value[yi_local + k] = v[k];
+            }
         }
         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
@@ -392,32 +416,34 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
         int col = mlpForwardFusedArg.m_Ws[i].m_col; // output
 
         {
+            float bias = xi < col ? getElem( xi, 0, matBuffer, mlpForwardFusedArg.m_Bs[i] ) : 0.0f;
             for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
             {
-                value[yi_local] = 0.0f;
+                value[yi_local] = bias;
             }
         }
         
         if( xi < col )
         {
+            float4 bs;
             for( int j = 0 ; j < row ; j++ ) 
             {
-                float b = getElem( xi /* output xi */, j, matBuffer, mlpForwardFusedArg.m_Ws[i] );
+                if( ( j % 4 ) == 0 )
+                {
+                    bs = getElem4( xi /* output xi */, j, matBuffer, mlpForwardFusedArg.m_Ws[i] );
+                }
+                float b = bs[j % 4];
                 for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
                 {
                     float a = getTensor( j, yi_local );
                     value[yi_local] += a * b;
                 }
             }
-            float bias = getElem( xi, 0, matBuffer, mlpForwardFusedArg.m_Bs[i] );
-
+            
+            float lowerbounds = i + 1 != mlpForwardFusedArg.nLayer ? 0.0f : -3.40282e+38f;
             for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
             {
-                value[yi_local] += bias;
-                if( i + 1 != mlpForwardFusedArg.nLayer )
-                {
-                    value[yi_local] = relu( value[yi_local] );
-                }
+                value[yi_local] = max( value[yi_local], lowerbounds );
             }
         }
         GroupMemoryBarrierWithGroupSync();
@@ -439,12 +465,13 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
             value[yi_local] = getTensor( xi, yi_local ); // ds_read_B128
         }
 
-        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 4 )
         {
             int yi = threadId.y * TENSOR_ROW + yi_local;
             if( yi < mlpForwardFusedArg.outputMat.m_row )
             {
-                setElem( xi, yi, outputs, mlpForwardFusedArg.outputMat, value[yi_local] );
+                float4 v = float4( value[yi_local], value[yi_local + 1], value[yi_local + 2], value[yi_local + 3] );
+                setElem4( xi, yi, outputs, mlpForwardFusedArg.outputMat, v );
             }
         }
     }
