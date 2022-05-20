@@ -315,7 +315,11 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 4 )
         {
             int yi = threadId.y * TENSOR_ROW + yi_local;
-            float4 v = yi < mlpForwardFusedArg.inputMat.m_row ? getElem4( xi, yi, inputs, mlpForwardFusedArg.inputMat ) : 0.0f;
+            float4 v;
+            if( yi < mlpForwardFusedArg.inputMat.m_row )
+            {
+                v = getElem4( xi, yi, inputs, mlpForwardFusedArg.inputMat );
+            }
             for(int k = 0 ; k < 4 ; k++)
             {
                 value[yi_local + k] = v[k];
