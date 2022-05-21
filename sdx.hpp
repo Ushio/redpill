@@ -868,7 +868,7 @@ inline void loadAsVector( std::vector<char>* buffer, const char* fllePath )
 class Shader
 {
 public:
-	Shader( Device* device, const char* filename, const char* includeDir, CompileMode compileMode )
+	Shader( Device* device, const char* filename, const char* includeDir, const std::vector<std::string>& extraArgs, CompileMode compileMode )
 	{
 		HRESULT hr;
 		DxPtr<IDxcIncludeHandler> pIncludeHandler;
@@ -884,6 +884,16 @@ public:
 			L"-I",
 			I.c_str(),
 		};
+		std::vector<std::wstring> extras;
+		for( const std::string& s : extraArgs )
+		{
+			extras.push_back( string_to_wstring( s ) );
+		}
+		for( const std::wstring& s : extras )
+		{
+			args.push_back( s.c_str() );
+		}
+
 		if( compileMode == CompileMode::Debug )
 		{
 			args.push_back( L"-Zi" );			// Enable debug information

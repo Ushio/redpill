@@ -3,6 +3,13 @@
 #include "redpill.hpp"
 #include "sdx.hpp"
 
+#include <intrin.h>
+#define RPMLX_ASSERT( ExpectTrue ) \
+	if( ( ExpectTrue ) == 0 )     \
+	{                             \
+		__debugbreak();           \
+	}
+
 namespace rpml
 {
 	struct GPUMat
@@ -38,13 +45,8 @@ namespace rpml
 	{
 		int mode;
 		int frequency_N;
-		int grid_L;
-		int grid_T;
-
-		int grid_F;
-		int grid_Nmin;
-		float grid_b;
 		int padd1;
+		int padd2;
 	};
 	#define FUSED 1
 
@@ -55,7 +57,7 @@ namespace rpml
 		MLP_GPU_Forward( dx::Device *device, const MLP& mlp, std::string kernels )
 		{
 			bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
-
+			std::vector<std::string> macros;
 			if( hasEncoder )
 			{
 				auto f = dynamic_cast<const FrequencyEncoder*>( mlp.m_layers[0].get() );
@@ -71,6 +73,13 @@ namespace rpml
 
 					int bytesPerTable = g->m_config.T * g->m_config.F * sizeof( float );
 					m_gridBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, bytesPerTable * g->m_config.L, "Grid Buffer" ) );
+
+					macros.push_back( "-DGRID_INPUT_DIM=" + std::to_string( mlp.m_layers[0]->inputDimensions() ) );
+					macros.push_back( "-DGRID_L=" + std::to_string( g->m_config.L ) );
+					macros.push_back( "-DGRID_T=" + std::to_string( g->m_config.T ) );
+					macros.push_back( "-DGRID_F=" + std::to_string( g->m_config.F ) );
+					macros.push_back( "-DGRID_NMIN=(float)(" + std::to_string( g->m_config.Nmin ) + ")" );
+					macros.push_back( "-DGRID_B=(float)(" + std::to_string( g->m_config.b ) + ")" );
 				}
 			}
 
@@ -106,9 +115,9 @@ namespace rpml
 			m_matBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, location * sizeof( float ), "Layer Mat" ) );
 
 			#if FUSED
-			m_forwardShader = std::unique_ptr<dx::Shader>( new dx::Shader( device, ( kernels + "\\mlpForwardFused.hlsl" ).c_str(), kernels.c_str(), dx::CompileMode::Release ) );
+			m_forwardShader = std::unique_ptr<dx::Shader>( new dx::Shader( device, ( kernels + "\\mlpForwardFused.hlsl" ).c_str(), kernels.c_str(), macros, dx::CompileMode::Release ) );
 			#else
-			m_forwardShader = std::unique_ptr<dx::Shader>( new dx::Shader( device, ( kernels + "\\mlpForward.hlsl" ).c_str(), kernels.c_str(), dx::CompileMode::Release ) );
+			m_forwardShader = std::unique_ptr<dx::Shader>( new dx::Shader( device, ( kernels + "\\mlpForward.hlsl" ).c_str(), kernels.c_str(), macros, dx::CompileMode::Release ) );
 			#endif
 			m_arg = std::unique_ptr<dx::Shader::Argument>( m_forwardShader->newArgument( device ) );
 
@@ -123,10 +132,11 @@ namespace rpml
 			}
 			if( m_grid )
 			{
-				for( int li = 0; li < m_grid->m_config.L; ++li )
+				for( int level = 0; level < m_grid->m_config.L; ++level )
 				{
-					const Mat &feature = m_grid->m_features[li];
-					int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * li;
+					const Mat& feature = m_grid->m_features[level];
+
+					int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * level;
 					for( int fi = 0; fi < m_grid->m_config.F; ++fi )
 					{
 						int bytesPerFeature = m_grid->m_config.T * sizeof( float );
@@ -197,11 +207,6 @@ namespace rpml
 			if( m_grid )
 			{
 				encoding.mode = 2;
-				encoding.grid_L = m_grid->m_config.L;
-				encoding.grid_T = m_grid->m_config.T;
-				encoding.grid_F = m_grid->m_config.F;
-				encoding.grid_Nmin = m_grid->m_config.Nmin;
-				encoding.grid_b = m_grid->m_config.b;
 				m_arg->RWStructured( "gridFeature", m_gridBuffer.get() );
 			}
 			m_arg->Constant( "mlpEncoding", encoding );
@@ -223,7 +228,7 @@ namespace rpml
 			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
 
 			m_stopwatch->collect();
-			// printf( "forwardShader: %.5f ms\n", m_stopwatch->ms( "forwardShader" ) );
+			printf( "forwardShader: %.5f ms\n", m_stopwatch->ms( "forwardShader" ) );
 #else
 			int row = input.row();
 			int paddedRow = input.paddedRow();

@@ -258,6 +258,10 @@ namespace rpml
 		{
 			return m_data.size() * sizeof( float );
 		}
+		bool noPadding() const
+		{
+			return m_row == m_paddedRow;
+		}
 	private:
 		std::vector<float> m_data;
 		int m_row = 0;
