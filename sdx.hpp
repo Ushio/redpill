@@ -998,7 +998,7 @@ public:
 			{
 				range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 				_uav[bind.Name].location = i;
-				_uav[bind.Name].stride = 1;
+				_uav[bind.Name].stride = 0; // RWByteAddressBuffer
 				break;
 			}
 			default:
@@ -1081,14 +1081,23 @@ public:
 		void RWStructured( const char* var, Buffer* resource )
 		{
 			DX_ASSERT( _uav.count( var ), "" );
-			DX_ASSERT( ( resource->bytes() % _uav[var].stride ) == 0, "" );
 
 			D3D12_UNORDERED_ACCESS_VIEW_DESC d = {};
 			d.Format = DXGI_FORMAT_UNKNOWN;
-			d.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
 			d.Buffer.FirstElement = 0;
-			d.Buffer.NumElements = resource->bytes() / _uav[var].stride;
-			d.Buffer.StructureByteStride = _uav[var].stride;
+			d.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+			if( _uav[var].stride == 0 ) // for RWByteAddressBuffer
+			{
+				d.Format = DXGI_FORMAT_R32_TYPELESS;
+				d.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+				d.Buffer.NumElements = resource->bytes() / 4;
+			}
+			else
+			{
+				d.Buffer.NumElements = resource->bytes() / _uav[var].stride;
+				d.Buffer.StructureByteStride = _uav[var].stride;
+			}
+			
 			d.Buffer.CounterOffsetInBytes = 0;
 			D3D12_CPU_DESCRIPTOR_HANDLE h = _bufferHeap->GetCPUDescriptorHandleForHeapStart();
 			h.ptr += (int64_t)_increment * _uav[var].location;
