@@ -322,14 +322,26 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
     int xi = localId.x;
     if( xi < mlpForwardFusedArg.inputMat.m_col )
     {
+        float4 vs[4];
         int yi_local;
         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 4 )
         {
             int yi = threadId.y * TENSOR_ROW + yi_local;
-            float4 v = float4( 0.0f, 0.0f, 0.0f, 0.0f );
             if( yi < mlpForwardFusedArg.inputMat.m_row )
             {
-                v = getElem4( xi, yi, inputs, mlpForwardFusedArg.inputMat );
+                vs[yi_local/4] = getElem4( xi, yi, inputs, mlpForwardFusedArg.inputMat );
+            }
+        }
+        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 4 )
+        {
+            float4 v = vs[yi_local/4];
+            int yi = threadId.y * TENSOR_ROW + yi_local;
+            for( int j = 0 ; j < 4 ; j++ )
+            {
+                if( mlpForwardFusedArg.inputMat.m_row <= yi + j )
+                {
+                    v[j] = 0.0f;
+                }
             }
             for( int j = 0 ; j < 4 ; j++ )
             {
@@ -373,6 +385,7 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
+        int baseLevel = GRID_T * GRID_F * level;
         float res = floor( GRID_NMIN * pow( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
@@ -392,12 +405,10 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
                 uint h;
                 evaluator.evaluate( w, h, res, input );
                 uint index = h % GRID_T;
-                int baseLevel = GRID_T * GRID_F * level;
                 int address = baseLevel + GRID_T * fdim + index;
                 float f = asfloat( gridFeature.Load( address * 4 ) );
                 feature += w * f;
             }
-
             setTensor( xi, yi_local, feature );
         }
         GroupMemoryBarrierWithGroupSync();
