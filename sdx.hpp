@@ -998,7 +998,7 @@ public:
 			{
 				range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 				_uav[bind.Name].location = i;
-				_uav[bind.Name].stride = 4;  // for NV, this must be 4
+				_uav[bind.Name].stride = 1;
 				break;
 			}
 			default:
