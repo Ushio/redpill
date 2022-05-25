@@ -183,7 +183,7 @@ namespace rpml
 			arg.nLayer = m_affineLayers.size();
 
 			// workaround for D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION
-#define DISPATCH_CHUNK 8096
+#define DISPATCH_CHUNK 8192
 			//int numberOfBlock = div_round_up( row, 8 );
 			//int numberOfChunk = div_round_up( numberOfBlock, DISPATCH_CHUNK );
 			//arg.nBlock = numberOfBlock;

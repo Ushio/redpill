@@ -232,7 +232,7 @@ RWByteAddressBuffer gridFeature;
 // [ TENSOR_ROW ] [ TENSOR_ROW ] [ TENSOR_ROW ]
 // nBlock: 3
 
-#define DISPATCH_CHUNK 8096
+#define DISPATCH_CHUNK 8192
 #define TENSOR_ROW 16
 #define PI 3.14159265358979323846f
 
@@ -322,7 +322,7 @@ void main( uint3 threadId : SV_DispatchThreadID, uint3 localId: SV_GroupThreadID
     int xi = localId.x;
     if( xi < mlpForwardFusedArg.inputMat.m_col )
     {
-        float4 vs[4];
+        float4 vs[TENSOR_ROW/4];
         int yi_local;
         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local += 4 )
         {
