@@ -208,7 +208,7 @@ namespace rpml
 		GPUMat m_Ws[16];
 		GPUMat m_Bs[16];
 		int nLayer;
-		int nBlock;
+		int padd0;
 		int padd1;
 		int padd2;
 	};
@@ -228,13 +228,13 @@ namespace rpml
 		{
 			bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
 			//std::vector<std::string> macros;
-			//if( hasEncoder )
-			//{
-			//	auto f = dynamic_cast<const FrequencyEncoder*>( mlp.m_layers[0].get() );
-			//	if( f )
-			//	{
-			//		m_frequency = f;
-			//	}
+			if( hasEncoder )
+			{
+				auto f = dynamic_cast<const FrequencyEncoder*>( mlp.m_layers[0].get() );
+				if( f )
+				{
+					m_frequency = f;
+				}
 
 			//	auto g = dynamic_cast<const MultiResolutionHashEncoder*>( mlp.m_layers[0].get() );
 			//	if( g )
@@ -251,7 +251,7 @@ namespace rpml
 			//		macros.push_back( "-DGRID_NMIN=(float)(" + std::to_string( g->m_config.Nmin ) + ")" );
 			//		macros.push_back( "-DGRID_B=(float)(" + std::to_string( g->m_config.b ) + ")" );
 			//	}
-			//}
+			}
 
 			int maxCol = 0;
 			int location = 0;
@@ -349,11 +349,24 @@ namespace rpml
 			}
 			arg.nLayer = m_affineLayers.size();
 
+			MLPEncoding encoding = {};
+			if( m_frequency )
+			{
+				encoding.mode = 1;
+				encoding.frequency_N = m_frequency->m_config.N;
+			}
+			//if( m_grid )
+			//{
+			//	encoding.mode = 2;
+			//	m_arg->RWStructured( "gridFeature", m_gridBuffer.get() );
+			//}
+
 			ShaderArgument args;
 			args.add( m_inputBuffer->data() );
 			args.add( m_outputBuffer->data() );
 			args.add( m_matBuffer->data() );
 			args.add( arg );
+			args.add( encoding );
 
 #define TENSOR_ROW 16
 			int numberOfGrid = div_round_up( row, TENSOR_ROW );
@@ -364,7 +377,7 @@ namespace rpml
 			oroMemcpyDtoHAsync( output->data(), (oroDeviceptr)m_outputBuffer->data(), output->bytes(), stream );
 
 			oroStreamSynchronize( stream );
-			printf( "" );
+			
 			//
 //			// workaround for D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION
 //#define DISPATCH_CHUNK 8192

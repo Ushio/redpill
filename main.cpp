@@ -203,7 +203,8 @@ int main()
 				 .learningRate( 10.0f )
 				 .initType( InitializationType::He )
 				 .optimType( OptimizerType::Adam )
-				 .activationType( ActivationType::ReLU ) );
+				 .activationType( ActivationType::ReLU )
+				 .encoderType( EncoderType::Frequency ) );
 
 	//MLP mlp( MLPConfig()
 	//			 .shape( { 2, 64, 64, 3 } )

@@ -60,16 +60,17 @@ struct MLPForwardFusedArg
     GPUMat m_Ws[16];
     GPUMat m_Bs[16];
     int nLayer;
-    int nBlock;
+    int padd0;
     int padd1;
     int padd2;
 };
-
-DEVICE
-float relu( float x ) 
+struct MLPEncoding
 {
-    return max( x, 0.0f );
-}
+    int mode;
+    int frequency_N;
+    int padd1;
+    int padd2;
+};
 
 DEVICE
 inline int div_round_up( int val, int divisor )
@@ -95,7 +96,7 @@ void setTensor( float* tensor, int xi, int yi, float value )
     tensor[xi * TENSOR_ROW + yi] = value;
 }
 
-extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, MLPForwardFusedArg mlpForwardFusedArg ) 
+extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, MLPForwardFusedArg mlpForwardFusedArg, MLPEncoding mlpEncoding ) 
 {
     __shared__ float tensor[64 * TENSOR_ROW];
 
@@ -107,8 +108,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
     if( xi < mlpForwardFusedArg.inputMat.m_col )
     {
         float vs[TENSOR_ROW];
-        int yi_local;
-        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
             int yi = yi_global_base + yi_local;
             if( yi < mlpForwardFusedArg.inputMat.m_row )
@@ -120,7 +120,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
                 vs[yi_local] = 0.0f;
             }
         }
-        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
             int yi = yi_global_base + yi_local;
             setTensor( tensor, xi, yi_local, vs[yi_local] );
@@ -128,35 +128,34 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
     }
     __syncthreads();
 
-    // if( mlpEncoding.mode == 1 ) // frequency
-    // {
-    //     int yi_local;
-    //     int outputCol = mlpForwardFusedArg.inputMat.m_col * mlpEncoding.frequency_N * 2;
+    if( mlpEncoding.mode == 1 ) // frequency
+    {
+        int outputCol = mlpForwardFusedArg.inputMat.m_col * mlpEncoding.frequency_N * 2;
 
-    //     if( xi < outputCol )
-    //     {
-    //         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
-    //         {
-    //             int xi_src = xi / ( mlpEncoding.frequency_N * 2 );
-    //             int baseEachDim = xi % ( mlpEncoding.frequency_N * 2 );
-    //             int i = baseEachDim / 2;
-    //             int tri_idx = baseEachDim % 2;
-    //             float v = getTensor( xi_src, yi_local );
-    //             float k = 2.0f * PI * pow( 2.0f, (float)i );
-    //             v = sin( k * v + ( tri_idx ? PI * 0.5f : 0.0f ) );
-    //             value[yi_local] = v;
-    //         }
-    //     }
-    //     GroupMemoryBarrierWithGroupSync();
-    //     if( xi < outputCol )
-    //     {
-    //         for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
-    //         {
-    //             setTensor( localId.x, yi_local, value[yi_local] );
-    //         }
-    //     }
-    //     GroupMemoryBarrierWithGroupSync();
-    // }
+        if( xi < outputCol )
+        {
+            for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+            {
+                int xi_src = xi / ( mlpEncoding.frequency_N * 2 );
+                int baseEachDim = xi % ( mlpEncoding.frequency_N * 2 );
+                int i = baseEachDim / 2;
+                int tri_idx = baseEachDim % 2;
+                float v = getTensor( tensor, xi_src, yi_local );
+                float k = 2.0f * PI * pow( 2.0f, (float)i );
+                v = sin( k * v + ( tri_idx ? PI * 0.5f : 0.0f ) );
+                value[yi_local] = v;
+            }
+        }
+        __syncthreads();
+        if( xi < outputCol )
+        {
+            for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+            {
+                setTensor( tensor, xi, yi_local, value[yi_local] );
+            }
+        }
+        __syncthreads();
+    }
     // if( mlpEncoding.mode == 2 ) // Multi Resolution Hash
     // {
     //     int level = xi / GRID_F;
@@ -205,14 +204,8 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         
         if( xi < col )
         {
-            float4 bs;
             for( int j = 0 ; j < row ; j++ ) 
             {
-                // if( ( j % 4 ) == 0 )
-                // {
-                //     bs = getElem4( xi /* output xi */, j, matBuffer, mlpForwardFusedArg.m_Ws[i] );
-                // }
-                // float b = bs[j % 4];
                 float b = getElem( xi /* output xi */, j, matBuffer, mlpForwardFusedArg.m_Ws[i] );
                 for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
                 {
