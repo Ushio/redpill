@@ -53,6 +53,11 @@ void setElem4( int x, int y, float* buffer, GPUMat mat, float4 v )
     buffer[index + 2] = v.z;
     buffer[index + 3] = v.w;
 }
+DEVICE
+inline float maxss( float a, float b )
+{
+    return ( b < a ) ? a : b;
+}
 
 struct MLPForwardFusedArg
 {
@@ -282,14 +287,14 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
                 for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
                 {
                     float a = getTensor( tensor, j, yi_local );
-                    value[yi_local] += a * b;
+                    value[yi_local] = fma( a, b, value[yi_local] );
                 }
             }
             
             float lowerbounds = i + 1 != mlpForwardFusedArg.nLayer ? 0.0f : -3.40282e+38f;
             for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
             {
-                value[yi_local] = max( value[yi_local], lowerbounds );
+                value[yi_local] = maxss( value[yi_local], lowerbounds );
             }
         }
 
