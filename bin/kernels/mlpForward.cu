@@ -294,7 +294,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
             float lowerbounds = i + 1 != mlpForwardFusedArg.nLayer ? 0.0f : -3.40282e+38f;
             for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
             {
-                value[yi_local] = maxss( value[yi_local], lowerbounds );
+                value[yi_local] = fmaxf( value[yi_local], lowerbounds );
             }
         }
 
