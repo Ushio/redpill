@@ -124,6 +124,11 @@ namespace rpml
 				options.push_back( "-G" );
 			}
 
+			for( int i = 0; i < extraArgs.size(); ++i )
+			{
+				options.push_back( extraArgs[i] );
+			}
+
 			std::vector<const char*> optionChars;
 			for( int i = 0; i < options.size(); ++i )
 			{
@@ -227,7 +232,7 @@ namespace rpml
 		MLP_GPU_Forward( const MLP& mlp, std::string kernels )
 		{
 			bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
-			//std::vector<std::string> macros;
+			std::vector<std::string> macros;
 			if( hasEncoder )
 			{
 				auto f = dynamic_cast<const FrequencyEncoder*>( mlp.m_layers[0].get() );
@@ -236,21 +241,21 @@ namespace rpml
 					m_frequency = f;
 				}
 
-			//	auto g = dynamic_cast<const MultiResolutionHashEncoder*>( mlp.m_layers[0].get() );
-			//	if( g )
-			//	{
-			//		m_grid = g;
+				auto g = dynamic_cast<const MultiResolutionHashEncoder*>( mlp.m_layers[0].get() );
+				if( g )
+				{
+					m_grid = g;
 
-			//		int bytesPerTable = g->m_config.T * g->m_config.F * sizeof( float );
-			//		m_gridBuffer = std::unique_ptr<dx::Buffer>( new dx::Buffer( device, bytesPerTable * g->m_config.L, "Grid Buffer" ) );
+					int bytesPerTable = g->m_config.T * g->m_config.F * sizeof( float );
+					m_gridBuffer = std::unique_ptr<Buffer>( new Buffer( bytesPerTable * g->m_config.L ) );
 
-			//		macros.push_back( "-DGRID_INPUT_DIM=" + std::to_string( mlp.m_layers[0]->inputDimensions() ) );
-			//		macros.push_back( "-DGRID_L=" + std::to_string( g->m_config.L ) );
-			//		macros.push_back( "-DGRID_T=" + std::to_string( g->m_config.T ) );
-			//		macros.push_back( "-DGRID_F=" + std::to_string( g->m_config.F ) );
-			//		macros.push_back( "-DGRID_NMIN=(float)(" + std::to_string( g->m_config.Nmin ) + ")" );
-			//		macros.push_back( "-DGRID_B=(float)(" + std::to_string( g->m_config.b ) + ")" );
-			//	}
+					macros.push_back( "-DGRID_INPUT_DIM=" + std::to_string( mlp.m_layers[0]->inputDimensions() ) );
+					macros.push_back( "-DGRID_L=" + std::to_string( g->m_config.L ) );
+					macros.push_back( "-DGRID_T=" + std::to_string( g->m_config.T ) );
+					macros.push_back( "-DGRID_F=" + std::to_string( g->m_config.F ) );
+					macros.push_back( "-DGRID_NMIN=(float)(" + std::to_string( g->m_config.Nmin ) + ")" );
+					macros.push_back( "-DGRID_B=(float)(" + std::to_string( g->m_config.b ) + ")" );
+				}
 			}
 
 			int maxCol = 0;
@@ -284,11 +289,7 @@ namespace rpml
 
 			m_matBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 
-			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, {}, CompileMode::Release ) );
-			
-			// m_arg = std::unique_ptr<dx::Shader::Argument>( m_forwardShader->newArgument( device ) );
-			// 
-			// m_stopwatch = std::unique_ptr<dx::DeviceStopwatch>( new dx::DeviceStopwatch( device, 1024, true ) );
+			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release ) );
 		}
 		void foward( oroStream stream, const Mat& input, Mat* output )
 		{
@@ -297,21 +298,21 @@ namespace rpml
 				oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Ws[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_W.data(), m_affineLayers[i]->m_W.bytes() );
 				oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_b.data(), m_affineLayers[i]->m_b.bytes() );
 			}
-//			if( m_grid )
-//			{
-//				for( int level = 0; level < m_grid->m_config.L; ++level )
-//				{
-//					const Mat& feature = m_grid->m_features[level];
-//
-//					int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * level;
-//					for( int fi = 0; fi < m_grid->m_config.F; ++fi )
-//					{
-//						int bytesPerFeature = m_grid->m_config.T * sizeof( float );
-//						device->copyH2D( m_gridBuffer.get(), &feature( fi, 0 ), baseLevel + bytesPerFeature * fi, bytesPerFeature, dx::Device::CopyMode::PrefferedEnqueue );
-//					}
-//				}
-//			}
-//
+			if( m_grid )
+			{
+				for( int level = 0; level < m_grid->m_config.L; ++level )
+				{
+					const Mat& feature = m_grid->m_features[level];
+
+					int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * level;
+					for( int fi = 0; fi < m_grid->m_config.F; ++fi )
+					{
+						int bytesPerFeature = m_grid->m_config.T * sizeof( float );
+						oroMemcpyHtoD( (oroDeviceptr)( m_gridBuffer->data() + baseLevel + bytesPerFeature * fi ), (void*)&feature( fi, 0 ), bytesPerFeature );
+					}
+				}
+			}
+
 			int row = input.row();
 			int paddedRow = input.paddedRow();
 
@@ -355,16 +356,16 @@ namespace rpml
 				encoding.mode = 1;
 				encoding.frequency_N = m_frequency->m_config.N;
 			}
-			//if( m_grid )
-			//{
-			//	encoding.mode = 2;
-			//	m_arg->RWStructured( "gridFeature", m_gridBuffer.get() );
-			//}
+			if( m_grid )
+			{
+				encoding.mode = 2;
+			}
 
 			ShaderArgument args;
 			args.add( m_inputBuffer->data() );
 			args.add( m_outputBuffer->data() );
 			args.add( m_matBuffer->data() );
+			args.add( m_gridBuffer ? m_gridBuffer->data() : nullptr );
 			args.add( arg );
 			args.add( encoding );
 
@@ -442,11 +443,7 @@ namespace rpml
 		const MultiResolutionHashEncoder* m_grid = 0;
 		std::vector<const AffineLayer*> m_affineLayers;
 
-		// std::unique_ptr<dx::Buffer> m_gridBuffer;
-		// 
+		std::unique_ptr<Buffer> m_gridBuffer;
 		std::unique_ptr<Shader> m_forwardShader;
-		// std::unique_ptr<dx::Shader::Argument> m_arg;
-		// 
-		// std::unique_ptr<dx::DeviceStopwatch> m_stopwatch;
 	};
 }

@@ -6,6 +6,7 @@
     #define GRID_NMIN 8
     #define GRID_B 2.0f
 #endif
+typedef unsigned int uint32_t;
 
 #define DEVICE __device__
 
@@ -95,8 +96,79 @@ void setTensor( float* tensor, int xi, int yi, float value )
 {
     tensor[xi * TENSOR_ROW + yi] = value;
 }
+const uint32_t PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
 
-extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, MLPForwardFusedArg mlpForwardFusedArg, MLPEncoding mlpEncoding ) 
+struct DimensionHasher
+{
+    uint32_t m_h;
+
+    DEVICE
+    void init()
+    {
+        m_h = 0;
+    }
+
+    DEVICE
+    void add( uint32_t xs, int d )
+    {
+        m_h ^= xs * PRIMES[ min( d, 6 ) ];
+    }
+
+    DEVICE
+    uint32_t value() { return m_h; }
+};
+
+struct HashGridEvaluator
+{
+    int m_dim;
+    uint32_t m_bits;
+
+    DEVICE
+    void init( int dim )
+    {
+        m_dim = dim;
+        m_bits = 0xFFFFFFFF;
+    }
+
+    DEVICE
+    bool moveNext()
+    {
+        m_bits++;
+        return m_bits < ( 1U << m_dim );
+    }
+
+    DEVICE
+    void evaluate( float* weight, uint32_t* hashValue, int resolution, float* input )
+    {
+        DimensionHasher hasher;
+        hasher.init();
+
+        float w = 1.0f;
+        for( int d = 0; d < m_dim; ++d )
+        {
+            float x_in = input[ min( d, GRID_INPUT_DIM - 1 ) ];
+
+            float xf = x_in * resolution;
+            uint32_t xi = xf;
+            float u = xf - xi;
+
+            if( m_bits & ( 1U << d ) )
+            {
+                w *= u;
+                hasher.add( xi + 1, d );
+            }
+            else
+            {
+                w *= 1.0f - u;
+                hasher.add( xi, d );
+            }
+        }
+        *weight = w;
+        *hashValue = hasher.value();
+    }
+};
+
+extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, float* gridFeature, MLPForwardFusedArg mlpForwardFusedArg, MLPEncoding mlpEncoding ) 
 {
     __shared__ float tensor[64 * TENSOR_ROW];
 
@@ -155,38 +227,41 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         }
         __syncthreads();
     }
-    // if( mlpEncoding.mode == 2 ) // Multi Resolution Hash
-    // {
-    //     int level = xi / GRID_F;
-    //     int fdim  = xi % GRID_F;
-    //     int baseLevel = GRID_T * GRID_F * level;
-    //     float res = floor( GRID_NMIN * pow( GRID_B, level ) );
-    //     for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
-    //     {
-    //         float input[GRID_INPUT_DIM];
-    //         for( int x = 0 ; x < GRID_INPUT_DIM ; x++ )
-    //         {
-    //             input[x] = getTensor( x, yi_local );
-    //         }
-    //         GroupMemoryBarrierWithGroupSync();
+    if( mlpEncoding.mode == 2 ) // Multi Resolution Hash
+    {
+        int level = xi / GRID_F;
+        int fdim  = xi % GRID_F;
+        int baseLevel = GRID_T * GRID_F * level;
+        float res = floor( GRID_NMIN * powf( GRID_B, level ) );
+        for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        {
+            float input[GRID_INPUT_DIM];
+            for( int x = 0 ; x < GRID_INPUT_DIM ; x++ )
+            {
+                input[x] = getTensor( tensor, x, yi_local );
+            }
+            __syncthreads();
 
-    //         HashGridEvaluator evaluator;
-    //         evaluator.init( GRID_INPUT_DIM );
-    //         float feature = 0.0f;
-    //         while( evaluator.moveNext() )
-    //         {
-    //             float w;
-    //             uint h;
-    //             evaluator.evaluate( w, h, res, input );
-    //             uint index = h % GRID_T;
-    //             int address = baseLevel + GRID_T * fdim + index;
-    //             float f = asfloat( gridFeature.Load( address * 4 ) );
-    //             feature += w * f;
-    //         }
-    //         setTensor( xi, yi_local, feature );
-    //     }
-    //     GroupMemoryBarrierWithGroupSync();
-    // }
+            if( level < GRID_L )
+            {
+                HashGridEvaluator evaluator;
+                evaluator.init( GRID_INPUT_DIM );
+                float feature = 0.0f;
+                while( evaluator.moveNext() )
+                {
+                    float w;
+                    uint32_t h;
+                    evaluator.evaluate( &w, &h, res, input );
+                    uint32_t index = h % GRID_T;
+                    int address = baseLevel + GRID_T * fdim + index;
+                    float f = gridFeature[address];
+                    feature += w * f;
+                }
+                setTensor( tensor, xi, yi_local, feature );
+            }
+        }
+        __syncthreads();
+    }
     
     for( int i = 0 ; i < mlpForwardFusedArg.nLayer ; i++ )
     {

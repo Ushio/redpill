@@ -204,7 +204,7 @@ int main()
 				 .initType( InitializationType::He )
 				 .optimType( OptimizerType::Adam )
 				 .activationType( ActivationType::ReLU )
-				 .encoderType( EncoderType::Frequency ) );
+				 .encoderType( EncoderType::MultiResolutionHash ) );
 
 	//MLP mlp( MLPConfig()
 	//			 .shape( { 2, 64, 64, 3 } )
