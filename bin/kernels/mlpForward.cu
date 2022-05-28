@@ -122,7 +122,6 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         }
         for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
-            int yi = yi_global_base + yi_local;
             setTensor( tensor, xi, yi_local, vs[yi_local] );
         }
     }
@@ -194,12 +193,10 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         int row = mlpForwardFusedArg.m_Ws[i].m_row; // input
         int col = mlpForwardFusedArg.m_Ws[i].m_col; // output
 
+        float bias = xi < col ? getElem( xi, 0, matBuffer, mlpForwardFusedArg.m_Bs[i] ) : 0.0f;
+        for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
-            float bias = xi < col ? getElem( xi, 0, matBuffer, mlpForwardFusedArg.m_Bs[i] ) : 0.0f;
-            for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
-            {
-                value[yi_local] = bias;
-            }
+            value[yi_local] = bias;
         }
         
         if( xi < col )
@@ -235,13 +232,11 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
 
     if( xi < mlpForwardFusedArg.outputMat.m_col )
     {
-        int yi_local;
-        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
             value[yi_local] = getTensor( tensor, xi, yi_local );
         }
-
-        for( yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
+        for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
             int yi = yi_global_base + yi_local;
             if( yi < mlpForwardFusedArg.outputMat.m_row )
