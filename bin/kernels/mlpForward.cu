@@ -1,5 +1,5 @@
-#ifndef GRID_INPUT_DIM
-    #define GRID_INPUT_DIM 2
+#ifndef GRID_L
+    #define GRID_INPUT_DIM 1
     #define GRID_L 16
     #define GRID_T (1 << 19)
     #define GRID_F 3
@@ -202,7 +202,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
     if( mlpEncoding.mode == 1 ) // frequency
     {
         int outputCol = mlpForwardFusedArg.inputMat.m_col * mlpEncoding.frequency_N * 2;
-
+        
         if( xi < outputCol )
         {
             for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
@@ -212,8 +212,8 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
                 int i = baseEachDim / 2;
                 int tri_idx = baseEachDim % 2;
                 float v = getTensor( tensor, xi_src, yi_local );
-                float k = 2.0f * PI * pow( 2.0f, (float)i );
-                v = sin( k * v + ( tri_idx ? PI * 0.5f : 0.0f ) );
+                float k = 2.0f * PI * __powf( 2.0f, (float)i );
+                v = __sinf( k * v + ( tri_idx ? PI * 0.5f : 0.0f ) );
                 value[yi_local] = v;
             }
         }
@@ -232,7 +232,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
         int baseLevel = GRID_T * GRID_F * level;
-        float res = floor( GRID_NMIN * powf( GRID_B, level ) );
+        float res = floor( GRID_NMIN * __powf( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < TENSOR_ROW ; yi_local++ )
         {
             float input[GRID_INPUT_DIM];
