@@ -5,7 +5,8 @@
 
 #define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
-#include "redpillx.hpp"
+//#include "redpillx.hpp"
+#include "redpillg.hpp"
 
 using namespace rpml;
 
@@ -202,8 +203,7 @@ int main()
 				 .learningRate( 10.0f )
 				 .initType( InitializationType::He )
 				 .optimType( OptimizerType::Adam )
-				 .activationType( ActivationType::ReLU )
-				 .encoderType( EncoderType::MultiResolutionHash ) );
+				 .activationType( ActivationType::ReLU ) );
 
 	//MLP mlp( MLPConfig()
 	//			 .shape( { 2, 64, 64, 3 } )
@@ -215,16 +215,40 @@ int main()
 
 	/* gpu estimator */
 	// dx::activateDebugLayer();
-	auto adapters = dx::allAdapters();
-	dx::Device device( adapters[0] );
+	//auto adapters = dx::allAdapters();
+	//dx::Device device( adapters[0] );
 
-	// please check developer mode setting.
-	// device.setStablePowerState( true );
+	//// please check developer mode setting.
+	//// device.setStablePowerState( true );
 
-	MLP_GPU_Forward mlpx( &device, mlp, pr::GetDataPath("kernels") );
+	//MLP_GPU_Forward mlpx( &device, mlp, pr::GetDataPath("kernels") );
+
 
 	//dx::Shader shader( &device, pr::GetDataPath( "src/hello.hlsl" ).c_str(), pr::GetDataPath( "src/" ).c_str(), dx::CompileMode::Release );
 	//std::unique_ptr<dx::Shader::Argument> arg( shader.newArgument( &device ) );
+
+	if( oroInitialize( ( oroApi )( ORO_API_HIP | ORO_API_CUDA ), 0 ) )
+	{
+		printf( "failed to init..\n" );
+		return 0;
+	}
+
+	oroError err;
+	err = oroInit( 0 );
+	oroDevice device;
+	err = oroDeviceGet( &device, 0 );
+	oroCtx ctx;
+	err = oroCtxCreate( &ctx, 0, device );
+	oroCtxSetCurrent( ctx );
+
+	oroStream stream = 0;
+	oroStreamCreate( &stream );
+
+    oroDeviceProp props;
+	oroGetDeviceProperties( &props, device );
+	printf( "GPU: %s\n", props.name );
+
+	MLP_GPU_Forward mlpx( mlp, pr::GetDataPath( "kernels" ) );
 
 	Config config;
 	config.ScreenWidth = 1500;
@@ -292,6 +316,7 @@ int main()
 
 		
 		static Image2DRGBA8 estimatedImage;
+		// float sEstimate = 0;
 		//float sEstimate = estimate( &estimatedImage, mlp, image.width() * previewScale, image.height() * previewScale );
 
 		Stopwatch sw_estimate;
@@ -311,7 +336,7 @@ int main()
 				inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
 			}
 		}
-		mlpx.foward( &device, inUVs, &outColors );
+		mlpx.foward( stream, inUVs, &outColors );
 
 		for( int yi = 0; yi < estimatorHeight; yi++ )
 		{

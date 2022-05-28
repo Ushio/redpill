@@ -1,3 +1,6 @@
 [submodule "libs/prlib"]
 	path = libs/prlib
 	url = https://github.com/Ushio/prlib
+[submodule "libs/orochi"]
+	path = libs/orochi
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/Orochi.git

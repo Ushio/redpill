@@ -19,11 +19,22 @@ project "demo"
     systemversion "latest"
     flags { "MultiProcessorCompile", "NoPCH" }
     cppdialect "C++17"
+    characterset ("MBCS")
 
     -- Src
     files { "main.cpp" }
     files { "redpill.hpp" }
     files { "redpillx.hpp" }
+
+    -- Orochi
+    includedirs { "libs/orochi" }
+    files { "libs/orochi/Orochi/Orochi.h" }
+    files { "libs/orochi/Orochi/Orochi.cpp" }
+    includedirs { "libs/orochi/contrib/hipew/include" }
+    files { "libs/orochi/contrib/hipew/src/hipew.cpp" }
+    includedirs { "libs/orochi/contrib/cuew/include" }
+    files { "libs/orochi/contrib/cuew/src/cuew.cpp" }
+    links { "version" }
 
     -- UTF8
     postbuildcommands { 
