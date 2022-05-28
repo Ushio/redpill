@@ -295,8 +295,8 @@ namespace rpml
 		{
 			for( int i = 0; i < m_affineLayers.size(); ++i )
 			{
-				oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Ws[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_W.data(), m_affineLayers[i]->m_W.bytes() );
-				oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_b.data(), m_affineLayers[i]->m_b.bytes() );
+				oroMemcpyHtoDAsync( ( oroDeviceptr )( m_matBuffer->data() + m_Ws[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_W.data(), m_affineLayers[i]->m_W.bytes(), stream );
+				oroMemcpyHtoDAsync( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_b.data(), m_affineLayers[i]->m_b.bytes(), stream );
 			}
 			if( m_grid )
 			{
@@ -308,7 +308,7 @@ namespace rpml
 					for( int fi = 0; fi < m_grid->m_config.F; ++fi )
 					{
 						int bytesPerFeature = m_grid->m_config.T * sizeof( float );
-						oroMemcpyHtoD( (oroDeviceptr)( m_gridBuffer->data() + baseLevel + bytesPerFeature * fi ), (void*)&feature( fi, 0 ), bytesPerFeature );
+						oroMemcpyHtoDAsync( ( oroDeviceptr )( m_gridBuffer->data() + baseLevel + bytesPerFeature * fi ), (void*)&feature( fi, 0 ), bytesPerFeature, stream );
 					}
 				}
 			}
@@ -327,7 +327,7 @@ namespace rpml
 				m_inputBuffer = std::unique_ptr<Buffer>( new Buffer( input.bytes() ) );
 			}
 
-			oroMemcpyHtoD( (oroDeviceptr)m_inputBuffer->data(), (void*)input.data(), input.bytes() );
+			oroMemcpyHtoDAsync( (oroDeviceptr)m_inputBuffer->data(), (void*)input.data(), input.bytes(), stream );
 
 			GPUMat outputGPU;
 			outputGPU.m_location = 0;
@@ -378,57 +378,6 @@ namespace rpml
 			oroMemcpyDtoHAsync( output->data(), (oroDeviceptr)m_outputBuffer->data(), output->bytes(), stream );
 
 			oroStreamSynchronize( stream );
-			
-			//
-//			// workaround for D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION
-//#define DISPATCH_CHUNK 8192
-//			//int numberOfBlock = div_round_up( row, 8 );
-//			//int numberOfChunk = div_round_up( numberOfBlock, DISPATCH_CHUNK );
-//			//arg.nBlock = numberOfBlock;
-//
-//#define TENSOR_ROW 16
-//			int numberOfBlock = div_round_up( row, TENSOR_ROW );
-//			int numberOfChunk = div_round_up( numberOfBlock, DISPATCH_CHUNK );
-//			arg.nBlock = numberOfBlock;
-//
-//			m_arg->Constant( "mlpForwardFusedArg", arg );
-//			m_arg->RWStructured( "inputs", m_inputBuffer.get() );
-//			m_arg->RWStructured( "outputs", m_outputBuffer.get() );
-//			m_arg->RWStructured( "matBuffer", m_matBuffer.get() );
-//
-//			MLPEncoding encoding = {};
-//			if( m_frequency )
-//			{
-//				encoding.mode = 1;
-//				encoding.frequency_N = m_frequency->m_config.N;
-//			}
-//			if( m_grid )
-//			{
-//				encoding.mode = 2;
-//				m_arg->RWStructured( "gridFeature", m_gridBuffer.get() );
-//			}
-//			m_arg->Constant( "mlpEncoding", encoding );
-//
-//			m_stopwatch->begin( "forwardShader" );
-//
-//			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, div_round_up( row, 8 ), 1 );
-//			
-//			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
-//			
-//			// m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, div_round_up( row, DISPATCH_CHUNK ) );
-//
-//			m_forwardShader->dispatchAsync( device, m_arg.get(), 1, DISPATCH_CHUNK, numberOfChunk );
-//
-//			m_stopwatch->end();
-//
-//			output->setShape( outputGPU.m_row, outputGPU.m_col );
-//
-//			device->copyD2H( output->data(), m_outputBuffer.get(), 0, output->bytes() );
-//
-//			m_stopwatch->collect();
-//			printf( "forwardShader: %.5f ms\n", m_stopwatch->ms( "forwardShader" ) );
-//
-//			device->present();
 		}
 
 		int m_maxCol = 0;
