@@ -16,6 +16,7 @@ typedef unsigned int uint32_t;
 
 namespace rpml
 {
+	const int GPU_MAT_ALIGNMENT = 8;
 	const float pi = 3.14159265358979323846f;
 
     DEVICE_INLINE int div_round_up( int val, int divisor )
@@ -55,6 +56,17 @@ namespace rpml
 	DEVICE_INLINE int elem( int x, int y, GPUMat mat )
 	{
 		return mat.m_location + mat.m_paddedRow * x + y;
+	}
+
+	DEVICE_INLINE GPUMat allocateGPUMat( int *location, int row, int col )
+	{
+		GPUMat m;
+		m.m_row = row;
+		m.m_col = col;
+		m.m_paddedRow = next_multiple( row, GPU_MAT_ALIGNMENT );
+		m.m_location = *location;
+		*location += m.m_paddedRow * m.m_col;
+		return m;
 	}
 
 	// 438976903 PRIMES[0] = 1 is very good for perf?

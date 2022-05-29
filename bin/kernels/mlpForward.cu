@@ -22,6 +22,37 @@ void setTensor( float* tensor, int xi, int yi, float value )
 
 using namespace rpml;
 
+extern "C" __global__ void train_forward( float* intermediates, float* matBuffer, GPUMat inputMat, GPUMat outputMat, GPUMat W, GPUMat B, int relu )
+{
+    int yi = blockIdx.x;
+    int xi = threadIdx.y;
+
+    if( inputMat.m_row <= yi )
+    {
+        return;
+    }
+
+    int row = W.m_row; // input
+    int col = W.m_col; // output
+
+    float value = xi < col ? matBuffer[ elem( xi, 0, B ) ] : 0.0f;
+
+    if( xi < col )
+    {
+        for( int j = 0 ; j < row ; j++ ) 
+        {
+            float b = matBuffer[ elem( xi /* output xi */, j, W ) ];
+            float a = intermediates[elem( j, yi, inputMat )];
+            value = fma( a, b, value );
+        }
+        
+        float lowerbounds = relu ? 0.0f : -3.40282e+38f;
+        value = fmaxf( value, lowerbounds );
+
+        intermediates[ elem( xi, yi, outputMat ) ] = value;
+    }
+}
+
 extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, float* gridFeature, MLPForwardFusedArg mlpForwardFusedArg, MLPEncodingArg mlpEncoding ) 
 {
     __shared__ float tensor[64 * SHARED_TENSOR_ROW];
