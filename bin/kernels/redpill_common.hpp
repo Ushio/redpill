@@ -52,6 +52,18 @@ namespace rpml
 		int padd1;
 		int padd2;
 	};
+	struct MLPTrainArg
+	{
+		GPUMat inputMat;
+		GPUMat outputMat;
+		GPUMat m_Ws[16];
+		GPUMat m_Bs[16];
+		GPUMat m_Is[16];
+		int nLayer;
+		int padd0;
+		int padd1;
+		int padd2;
+	};
 
 	DEVICE_INLINE int elem( int x, int y, GPUMat mat )
 	{
