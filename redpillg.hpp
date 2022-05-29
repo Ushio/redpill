@@ -188,43 +188,6 @@ namespace rpml
 		std::map<std::string, oroFunction> m_functions;
 	};
 
-	struct GPUMat
-	{
-		int m_row; // = inputs
-		int m_paddedRow;
-		int m_col; // = outputs
-		int m_location; // float location
-	};
-	struct MLPForwardArg
-	{
-		GPUMat inputMat;
-		GPUMat outputMat;
-		GPUMat m_W;
-		GPUMat m_B;
-		int activation;
-		int padd0;
-		int padd1;
-		int padd2;
-	};
-	struct MLPForwardFusedArg
-	{
-		GPUMat inputMat;
-		GPUMat outputMat;
-		GPUMat m_Ws[16];
-		GPUMat m_Bs[16];
-		int nLayer;
-		int padd0;
-		int padd1;
-		int padd2;
-	};
-	struct MLPEncoding
-	{
-		int mode;
-		int frequency_N;
-		int padd1;
-		int padd2;
-	};
-
 	// assume Relu
 	class MLP_GPU_Forward
 	{
@@ -350,7 +313,7 @@ namespace rpml
 			}
 			arg.nLayer = m_affineLayers.size();
 
-			MLPEncoding encoding = {};
+			MLPEncodingArg encoding = {};
 			if( m_frequency )
 			{
 				encoding.mode = 1;
@@ -369,8 +332,7 @@ namespace rpml
 			args.add( arg );
 			args.add( encoding );
 
-#define TENSOR_ROW 16
-			int numberOfGrid = div_round_up( row, TENSOR_ROW );
+			int numberOfGrid = div_round_up( row, SHARED_TENSOR_ROW );
 			m_forwardShader->launch( "forward", args, numberOfGrid, 1, 1, 1, 64, 1, stream );
 
 			output->setShape( outputGPU.m_row, outputGPU.m_col );

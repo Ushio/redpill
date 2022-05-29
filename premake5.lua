@@ -25,6 +25,8 @@ project "demo"
     files { "main.cpp" }
     files { "redpill.hpp" }
     files { "redpillx.hpp" }
+    includedirs { "bin/kernels" }
+    files { "bin/kernels/*.hpp" }
 
     -- Orochi
     includedirs { "libs/orochi" }
@@ -100,6 +102,9 @@ project "nerf"
     files { "nerf.cpp" }
     files { "redpill.hpp" }
 
+    includedirs { "bin/kernels" }
+    files { "bin/kernels/*.hpp" }
+
     -- UTF8
     postbuildcommands { 
         "mt.exe -manifest ../utf8.manifest -outputresource:\"$(TargetDir)$(TargetName).exe\" -nologo"
@@ -146,6 +151,8 @@ project "bugcatcher"
     files { "redpill.hpp" }
     files { "libs/prlib/src/prth.cpp" }
     files { "libs/prlib/src/prth.hpp" }
+    includedirs { "bin/kernels" }
+    files { "bin/kernels/*.hpp" }
 
     includedirs { "." }
     includedirs { "libs/prlib/src" }

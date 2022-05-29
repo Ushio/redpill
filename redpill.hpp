@@ -8,6 +8,8 @@
 #include <atomic>
 #include <chrono>
 
+#include "redpill_common.hpp"
+
 #include "prth.hpp"
 
 #if defined( RPML_DISABLE_ASSERT )
@@ -41,8 +43,6 @@
 
 namespace rpml
 {
-	const float pi = 3.14159265358979323846f;
-
 	enum class OptimizerType
 	{
 		SGD,
@@ -68,14 +68,14 @@ namespace rpml
 	};
 
 
-	inline int div_round_up( int val, int divisor )
-	{
-		return ( val + divisor - 1 ) / divisor;
-	}
-	inline int next_multiple( int val, int divisor )
-	{
-		return div_round_up( val, divisor ) * divisor;
-	}
+	//inline int div_round_up( int val, int divisor )
+	//{
+	//	return ( val + divisor - 1 ) / divisor;
+	//}
+	//inline int next_multiple( int val, int divisor )
+	//{
+	//	return div_round_up( val, divisor ) * divisor;
+	//}
 
 	constexpr float abs_constant( float x )
 	{
