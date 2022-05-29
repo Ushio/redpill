@@ -1018,20 +1018,6 @@ namespace rpml
 		Config m_config;
 	};
 
-	// 438976903 PRIMES[0] = 1 is very good for perf?
-	constexpr uint32_t PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
-	class DimensionHasher
-	{
-	public:
-		void add( uint32_t xs, int d )
-		{
-			RPML_ASSERT( d <= 7 );
-			m_h ^= xs * PRIMES[d];
-		}
-		uint32_t value() const { return m_h;  }
-	private:
-		uint32_t m_h = 0;
-	};
 	class HashGridEvaluator
 	{
 	public:

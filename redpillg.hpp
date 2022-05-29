@@ -114,6 +114,8 @@ namespace rpml
 			orortcProgram program = 0;
 			orortcCreateProgram( &program, src.data(), kernelLabel, 0, 0, 0 );
 			std::vector<std::string> options;
+			options.push_back( "-std=c++11");
+
 			for( int i = 0; i < includeDirs.size(); ++i )
 			{
 				options.push_back( "-I " + includeDirs[i] );

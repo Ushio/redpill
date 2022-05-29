@@ -22,27 +22,27 @@ namespace rpml
     {
         tensor[xi * SHARED_TENSOR_ROW + yi] = value;
     }
-    const uint32_t PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+    // const uint32_t PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
 
-    struct DimensionHasher
-    {
-        uint32_t m_h;
+    // struct DimensionHasher
+    // {
+    //     uint32_t m_h;
 
-        DEVICE
-        void init()
-        {
-            m_h = 0;
-        }
+    //     DEVICE
+    //     void init()
+    //     {
+    //         m_h = 0;
+    //     }
 
-        DEVICE
-        void add( uint32_t xs, int d )
-        {
-            m_h ^= xs * PRIMES[ min( d, 6 ) ];
-        }
+    //     DEVICE
+    //     void add( uint32_t xs, int d )
+    //     {
+    //         m_h ^= xs * PRIMES[ min( d, 6 ) ];
+    //     }
 
-        DEVICE
-        uint32_t value() { return m_h; }
-    };
+    //     DEVICE
+    //     uint32_t value() { return m_h; }
+    // };
 
     struct HashGridEvaluator
     {
@@ -67,7 +67,7 @@ namespace rpml
         void evaluate( float* weight, uint32_t* hashValue, int resolution, float* input )
         {
             DimensionHasher hasher;
-            hasher.init();
+            // hasher.init();
 
             float w = 1.0f;
             for( int d = 0; d < m_dim; ++d )
