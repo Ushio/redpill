@@ -8,8 +8,6 @@
 #include <atomic>
 #include <chrono>
 
-#include "redpill_common.hpp"
-
 #include "prth.hpp"
 
 #if defined( RPML_DISABLE_ASSERT )
@@ -22,6 +20,8 @@
 		__debugbreak();           \
 	}
 #endif
+
+#include "redpill_common.hpp"
 
 #define FOR_EACH_ELEMENT( m, ix, iy )     \
 	for( int ix = 0; ix < ( m ).col(); ix++ ) \
@@ -1018,49 +1018,7 @@ namespace rpml
 		Config m_config;
 	};
 
-	class HashGridEvaluator
-	{
-	public:
-		HashGridEvaluator( int dim ) : m_dim( dim ), m_bits( 0xFFFFFFFF )
-		{
-		}
-		bool moveNext()
-		{
-			m_bits++;
-			return m_bits < ( 1 << m_dim );
-		}
-		void evaluate( float* weight, uint32_t* hashValue, int resolution, float* input )
-		{
-			DimensionHasher hasher;
-			float w = 1.0f;
-			for( int d = 0; d < m_dim; ++d )
-			{
-				float x_in = input[d];
 
-				float xf = x_in * resolution;
-				uint32_t xi = xf;
-				float u = xf - xi;
-
-				RPML_ASSERT( 0.0f <= u && u <= 1.0f );
-
-				if( m_bits & ( 1 << d ) )
-				{
-					w *= u;
-					hasher.add( xi + 1, d );
-				}
-				else
-				{
-					w *= 1.0f - u;
-					hasher.add( xi, d );
-				}
-			}
-			*weight = w;
-			*hashValue = hasher.value();
-		}
-	private:
-		int m_dim;
-		uint32_t m_bits;
-	};
 	class HashGridVisitor
 	{
 	public:

@@ -1,10 +1,12 @@
 #pragma once
 
 #if defined( __HIPCC__ ) || defined( __CUDACC__ )
+#define IS_HOST 0
 #define DEVICE __device__
 #define DEVICE_INLINE __device__ inline
 typedef unsigned int uint32_t;
 #else
+#define IS_HOST 1
 #define DEVICE
 #define DEVICE_INLINE inline
 #include <cstdint>
@@ -71,4 +73,56 @@ namespace rpml
 	private:
 		uint32_t m_h = 0;
 	};
+
+	class HashGridEvaluator
+	{
+	public:
+		DEVICE
+		HashGridEvaluator( int dim ) : m_dim( dim ), m_bits( 0xFFFFFFFF )
+		{
+		}
+		DEVICE
+		bool moveNext()
+		{
+			m_bits++;
+			return m_bits < ( 1 << m_dim );
+		}
+		DEVICE
+		void evaluate( float* weight, uint32_t* hashValue, int resolution, float* input )
+		{
+			DimensionHasher hasher;
+			float w = 1.0f;
+			for( int d = 0; d < m_dim; ++d )
+			{
+				float x_in = input[d];
+
+				float xf = x_in * resolution;
+				uint32_t xi = xf;
+				float u = xf - xi;
+
+#if IS_HOST
+				RPML_ASSERT( 0.0f <= u && u <= 1.0f );
+#endif
+
+				if( m_bits & ( 1 << d ) )
+				{
+					w *= u;
+					hasher.add( xi + 1, d );
+				}
+				else
+				{
+					w *= 1.0f - u;
+					hasher.add( xi, d );
+				}
+			}
+			*weight = w;
+			*hashValue = hasher.value();
+		}
+
+	private:
+		int m_dim;
+		uint32_t m_bits;
+	};
+
+
 }

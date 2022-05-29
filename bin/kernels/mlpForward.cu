@@ -9,90 +9,15 @@
     #define GRID_B 2.0f
 #endif
 
-namespace rpml
+DEVICE
+float getTensor( float* tensor, int xi, int yi )
 {
-    DEVICE
-    float getTensor( float* tensor, int xi, int yi )
-    {
-        return tensor[xi * SHARED_TENSOR_ROW + yi];
-    }
-
-    DEVICE
-    void setTensor( float* tensor, int xi, int yi, float value )
-    {
-        tensor[xi * SHARED_TENSOR_ROW + yi] = value;
-    }
-    // const uint32_t PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
-
-    // struct DimensionHasher
-    // {
-    //     uint32_t m_h;
-
-    //     DEVICE
-    //     void init()
-    //     {
-    //         m_h = 0;
-    //     }
-
-    //     DEVICE
-    //     void add( uint32_t xs, int d )
-    //     {
-    //         m_h ^= xs * PRIMES[ min( d, 6 ) ];
-    //     }
-
-    //     DEVICE
-    //     uint32_t value() { return m_h; }
-    // };
-
-    struct HashGridEvaluator
-    {
-        int m_dim;
-        uint32_t m_bits;
-
-        DEVICE
-        void init( int dim )
-        {
-            m_dim = dim;
-            m_bits = 0xFFFFFFFF;
-        }
-
-        DEVICE
-        bool moveNext()
-        {
-            m_bits++;
-            return m_bits < ( 1U << m_dim );
-        }
-
-        DEVICE
-        void evaluate( float* weight, uint32_t* hashValue, int resolution, float* input )
-        {
-            DimensionHasher hasher;
-            // hasher.init();
-
-            float w = 1.0f;
-            for( int d = 0; d < m_dim; ++d )
-            {
-                float x_in = input[ min( d, GRID_INPUT_DIM - 1 ) ];
-
-                float xf = x_in * resolution;
-                uint32_t xi = xf;
-                float u = xf - xi;
-
-                if( m_bits & ( 1U << d ) )
-                {
-                    w *= u;
-                    hasher.add( xi + 1, d );
-                }
-                else
-                {
-                    w *= 1.0f - u;
-                    hasher.add( xi, d );
-                }
-            }
-            *weight = w;
-            *hashValue = hasher.value();
-        }
-    };
+    return tensor[xi * SHARED_TENSOR_ROW + yi];
+}
+DEVICE
+void setTensor( float* tensor, int xi, int yi, float value )
+{
+    tensor[xi * SHARED_TENSOR_ROW + yi] = value;
 }
 
 using namespace rpml;
@@ -173,8 +98,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
 
             if( level < GRID_L )
             {
-                HashGridEvaluator evaluator;
-                evaluator.init( GRID_INPUT_DIM );
+                HashGridEvaluator evaluator( GRID_INPUT_DIM );
                 float feature = 0.0f;
                 while( evaluator.moveNext() )
                 {
