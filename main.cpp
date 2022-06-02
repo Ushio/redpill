@@ -203,8 +203,8 @@ int main()
 				 .learningRate( 10.0f )
 				 .initType( InitializationType::He )
 				 .optimType( OptimizerType::Adam )
-				 .activationType( ActivationType::ReLU )
-				 .encoderType( EncoderType::MultiResolutionHash ) );
+				 .activationType( ActivationType::ReLU ) );
+
 
 	//MLP mlp( MLPConfig()
 	//			 .shape( { 2, 64, 64, 3 } )
@@ -249,7 +249,15 @@ int main()
 	oroGetDeviceProperties( &props, device );
 	printf( "GPU: %s\n", props.name );
 
-	MLP_GPU_Forward mlpx( mlp, pr::GetDataPath( "kernels" ) );
+	MLPg mlpg( MLPConfig()
+				.shape( { 2, 64, 64, 3 } )
+				.learningRate( 10.0f )
+				.initType( InitializationType::He )
+				.optimType( OptimizerType::Adam )
+				.activationType( ActivationType::ReLU ),
+			pr::GetDataPath( "kernels" ) );
+
+	//MLP_GPU_Forward mlpx( mlp, pr::GetDataPath( "kernels" ) );
 
 	Config config;
 	config.ScreenWidth = 1500;
@@ -309,7 +317,8 @@ int main()
 				refs( 2, i ) = y.z / 255.0f;
 			}
 			// printf( "sw_prepare %f\n", sw_prepare.elapsed() );
-			loss = mlp.train( inputs, refs );
+			// loss = mlp.train( inputs, refs );
+			mlpg.train( stream, inputs, refs );
 
 			iterations++;
 		}
@@ -337,7 +346,9 @@ int main()
 				inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
 			}
 		}
-		mlpx.foward( stream, inUVs, &outColors );
+		// mlpx.foward( stream, inUVs, &outColors );
+		// mlpg.fowardNaive( stream, inUVs, &outColors, mlp );
+		mlpg.foward( stream, inUVs, &outColors );
 
 		for( int yi = 0; yi < estimatorHeight; yi++ )
 		{

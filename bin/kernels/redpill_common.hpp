@@ -55,7 +55,7 @@ namespace rpml
 	struct MLPTrainArg
 	{
 		GPUMat inputMat;
-		GPUMat outputMat;
+		GPUMat inputRefMat;
 		GPUMat m_Ws[16];
 		GPUMat m_Bs[16];
 		GPUMat m_Is[16];
@@ -148,5 +148,23 @@ namespace rpml
 		uint32_t m_bits;
 	};
 
+	const float ADAM_BETA1 = 0.9f;
+	const float ADAM_BETA2 = 0.999f;
+	const float ADAM_E = 10.0e-15f;
+	struct Adam
+	{
+		float m_m;
+		float m_v;
 
+		DEVICE
+		float optimize( float value, float g, float alpha, float beta1t, float beta2t )
+		{
+			float s = alpha;
+			float m = m_m = ADAM_BETA1 * m_m + ( 1.0f - ADAM_BETA1 ) * g;
+			float v = m_v = ADAM_BETA2 * m_v + ( 1.0f - ADAM_BETA2 ) * g * g;
+			float m_hat = m / ( 1.0f - beta1t );
+			float v_hat = v / ( 1.0f - beta2t );
+			return value - s * m_hat / ( sqrt( v_hat ) + ADAM_E );
+		}
+	};
 }

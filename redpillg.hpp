@@ -402,6 +402,8 @@ namespace rpml
 
 			m_matBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			m_dmatBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
+			m_adamBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( Adam ) ) );
+			oroMemsetD8( (oroDeviceptr)m_adamBuffer->data(), 0, m_adamBuffer->bytes() );
 
 			// initialization
 			StandardRng rng;
@@ -434,19 +436,6 @@ namespace rpml
 		}
 		void train( oroStream stream, const Mat& input, const Mat& refs )
 		{
-			GPUMat inputRefGPU;
-			inputRefGPU.m_location = 0;
-			inputRefGPU.m_row = refs.row();
-			inputRefGPU.m_paddedRow = refs.paddedRow();
-			inputRefGPU.m_col = refs.col();
-
-			if( !m_inputRefBuffer || m_inputRefBuffer->bytes() < refs.bytes() )
-			{
-				m_inputRefBuffer = std::unique_ptr<Buffer>( new Buffer( refs.bytes() ) );
-			}
-
-			oroMemcpyHtoDAsync( (oroDeviceptr)m_inputRefBuffer->data(), (void*)refs.data(), refs.bytes(), stream );
-
 			m_Is.clear();
 
 			int location = 0;
@@ -458,194 +447,58 @@ namespace rpml
 				GPUMat I = allocateGPUMat( &location, input.row(), outputs );
 				m_Is.push_back( I );
 			}
+
+			GPUMat inputRefGPU = allocateGPUMat( &location, refs.row(), refs.col() );
+
 			if( !m_intermediateBuffer || m_intermediateBuffer->bytes() < location * sizeof( float ) )
 			{
 				m_intermediateBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			}
-
-			oroMemcpyHtoDAsync( (oroDeviceptr)m_intermediateBuffer->data(), (void*)input.data(), input.bytes(), stream );
-
-			for( int i = 0; i < m_Ws.size(); ++i )
-			{
-				GPUMat inputGPU  = m_Is[i];
-				GPUMat outputGPU = m_Is[i + 1];
-
-				ShaderArgument args;
-				args.add( m_intermediateBuffer->data() );
-				args.add( m_matBuffer->data() );
-				args.add( inputGPU );
-				args.add( outputGPU );
-				args.add( m_Ws[i] );
-				args.add( m_Bs[i] );
-				args.add( i + 1 != m_Ws.size() ? 1 : 0 );
-				m_forwardShader->launch( "train_forward", args, input.row(), 1, 1, 1, 64, 1, stream );
-			}
-
-			//MLPForwardFusedArg arg;
-			//arg.inputMat = inputGPU;
-			//// arg.outputMat = outputGPU;
-			//for( int i = 0; i < m_Ws.size(); ++i )
-			//{
-			//	arg.m_Ws[i] = m_Ws[i];
-			//	arg.m_Bs[i] = m_Bs[i];
-			//}
-			//arg.nLayer = m_Ws.size();
-
-			////MLPEncodingArg encoding = {};
-			////if( m_frequency )
-			////{
-			////	encoding.mode = 1;
-			////	encoding.frequency_N = m_frequency->m_config.N;
-			////}
-			////if( m_grid )
-			////{
-			////	encoding.mode = 2;
-			////}
-
-			//ShaderArgument args;
-			//args.add( m_inputBuffer->data() );
-			//args.add( m_inputRefBuffer->data() );
-			//args.add( m_matBuffer->data() );
-			//args.add( m_reluBuffer->data() );
-			//args.add( arg );
-			//m_forwardShader->launch( "train", args, gridDim, 1, 1, 1, 64, 1, stream );
-
-			oroStreamSynchronize( stream );
-
-		}
-		void fowardNaive( oroStream stream, const Mat& input, Mat* output, const MLP& mlp )
-		{
-			std::vector<const AffineLayer*> m_affineLayers;
-
-			{
-				int location = 0;
-				for( int i = 0; i < mlp.m_layers.size(); i += 2 )
-				{
-					auto affineLayer = dynamic_cast<const AffineLayer*>( mlp.m_layers[i].get() );
-
-					GPUMat w;
-					w.m_location = location;
-					w.m_row = affineLayer->m_W.row();
-					w.m_paddedRow = affineLayer->m_W.paddedRow();
-					w.m_col = affineLayer->m_W.col();
-					location += w.m_paddedRow * w.m_col;
-
-					GPUMat b;
-					b.m_location = location;
-					b.m_row = affineLayer->m_b.row();
-					b.m_paddedRow = affineLayer->m_b.paddedRow();
-					b.m_col = affineLayer->m_b.col();
-					location += b.m_paddedRow * b.m_col;
-
-					m_affineLayers.push_back( affineLayer );
-				}
-				for( int i = 0; i < m_Ws.size(); ++i )
-				{
-					oroMemcpyHtoDAsync( ( oroDeviceptr )( m_matBuffer->data() + m_Ws[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_W.data(), m_affineLayers[i]->m_W.bytes(), stream );
-					oroMemcpyHtoDAsync( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_b.data(), m_affineLayers[i]->m_b.bytes(), stream );
-				}
-			}
-
-			//GPUMat inputRefGPU;
-			//inputRefGPU.m_location = 0;
-			//inputRefGPU.m_row = refs.row();
-			//inputRefGPU.m_paddedRow = refs.paddedRow();
-			//inputRefGPU.m_col = refs.col();
-
-			//if( !m_inputRefBuffer || m_inputRefBuffer->bytes() < refs.bytes() )
-			//{
-			//	m_inputRefBuffer = std::unique_ptr<Buffer>( new Buffer( refs.bytes() ) );
-			//}
-
-			//oroMemcpyHtoDAsync( (oroDeviceptr)m_inputRefBuffer->data(), (void*)refs.data(), refs.bytes(), stream );
-
-			m_Is.clear();
-
-			int location = 0;
-			GPUMat inputGPU = allocateGPUMat( &location, input.row(), input.col() );
-			m_Is.push_back( inputGPU );
-			for( int i = 0; i < m_Ws.size(); ++i )
-			{
-				int outputs = m_Ws[i].m_col;
-				GPUMat I = allocateGPUMat( &location, input.row(), outputs );
-				m_Is.push_back( I );
-			}
-			if( !m_intermediateBuffer || m_intermediateBuffer->bytes() < location * sizeof( float ) )
-			{
-				m_intermediateBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
-			}
-			oroMemcpyHtoDAsync( (oroDeviceptr)m_intermediateBuffer->data(), (void*)input.data(), input.bytes(), stream );
-
-			GPUMat outputGPU;
-			outputGPU.m_location = 0;
-			outputGPU.m_row = input.row();
-			outputGPU.m_paddedRow = input.paddedRow();
-			outputGPU.m_col = m_Ws[m_Ws.size() - 1].m_col;
-			int64_t outputGPUBytes = (int64_t)outputGPU.m_paddedRow * outputGPU.m_col * sizeof( float );
-			if( !m_outputBuffer || m_outputBuffer->bytes() < outputGPUBytes )
-			{
-				m_outputBuffer = std::unique_ptr<Buffer>( new Buffer( outputGPUBytes ) );
-			}
+			oroMemcpyHtoDAsync( ( oroDeviceptr )m_intermediateBuffer->data(), (void*)input.data(), input.bytes(), stream );
+			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputRefGPU.m_location * sizeof( float ) ), (void*)refs.data(), refs.bytes(), stream );
+			oroMemsetD8Async( (oroDeviceptr)m_dmatBuffer->data(), 0, m_dmatBuffer->bytes(), stream );
 
 			MLPTrainArg arg;
 			arg.inputMat = inputGPU;
-			arg.outputMat = outputGPU;
+			arg.inputRefMat = inputRefGPU;
 			for( int i = 0; i < m_Ws.size(); ++i )
 			{
 				arg.m_Ws[i] = m_Ws[i];
 				arg.m_Bs[i] = m_Bs[i];
-				arg.m_Is[i] = m_Is[i + 1];
+			}
+			for( int i = 0; i < m_Ws.size() + 1; ++i )
+			{
+				arg.m_Is[i] = m_Is[i];
 			}
 			arg.nLayer = m_Ws.size();
 
-			ShaderArgument args;
-			args.add( m_intermediateBuffer->data() );
-			args.add( m_outputBuffer->data() );
-			args.add( m_matBuffer->data() );
-			args.add( m_intermediateBuffer->data() );
-			args.add( arg );
+			ShaderArgument trainArgs;
+			trainArgs.add( m_matBuffer->data() );
+			trainArgs.add( m_dmatBuffer->data() );
+			trainArgs.add( m_intermediateBuffer->data() );
+			trainArgs.add( arg );
 
 			int gridDim = div_round_up( input.row(), SHARED_TENSOR_ROW );
-			m_forwardShader->launch( "train", args, gridDim, 1, 1, 1, 64, 1, stream );
+			m_forwardShader->launch( "train", trainArgs, gridDim, 1, 1, 1, 64, 1, stream );
 
-			output->setShape( outputGPU.m_row, outputGPU.m_col );
+			m_iteration++;
+			float beta1t = pow( ADAM_BETA1, m_iteration );
+			float beta2t = pow( ADAM_BETA2, m_iteration );
+			int nAdam = m_adamBuffer->bytes() / sizeof( Adam );
 
-			// oroMemcpyDtoHAsync( output->data(), (oroDeviceptr)m_outputBuffer->data(), output->bytes(), stream );
-			oroMemcpyDtoHAsync( output->data(), ( oroDeviceptr )( m_intermediateBuffer->data() + m_Is[m_Is.size() - 1].m_location * sizeof( float ) ), output->bytes(), stream );
-
-			oroStreamSynchronize( stream );
-
-			//oroMemcpyHtoDAsync( (oroDeviceptr)m_intermediateBuffer->data(), (void*)input.data(), input.bytes(), stream );
-
-			//for( int i = 0; i < m_Ws.size(); ++i )
-			//{
-			//	pr::Stopwatch sw;
-			//	oroStreamSynchronize( stream );
-			//	GPUMat inputGPU = m_Is[i];
-			//	GPUMat outputGPU = m_Is[i + 1];
-
-			//	ShaderArgument args;
-			//	args.add( m_intermediateBuffer->data() );
-			//	args.add( m_matBuffer->data() );
-			//	args.add( inputGPU );
-			//	args.add( outputGPU );
-			//	args.add( m_Ws[i] );
-			//	args.add( m_Bs[i] );
-			//	args.add( i + 1 != m_Ws.size() ? 1 : 0 );
-			//	m_forwardShader->launch( "train_forward", args, input.row(), 1, 1, 1, 64, 1, stream );
-			//	oroStreamSynchronize( stream );
-			//	printf( "[%d] %f\n", i, sw.elapsed() );
-			//}
-			//GPUMat outputGPU = m_Is[m_Is.size() - 1];
-			//output->setShape( outputGPU.m_row, outputGPU.m_col );
-			//oroMemcpyDtoHAsync( output->data(), ( oroDeviceptr )( m_intermediateBuffer->data() + outputGPU.m_location * sizeof( float ) ), output->bytes(), stream );
-			//oroStreamSynchronize( stream );
-
-
+			ShaderArgument adamArgs;
+			adamArgs.add( m_matBuffer->data() );
+			adamArgs.add( m_dmatBuffer->data() );
+			adamArgs.add( m_adamBuffer->data() );
+			adamArgs.add( 10.0f / input.row() );
+			adamArgs.add( beta1t );
+			adamArgs.add( beta2t );
+			adamArgs.add( nAdam );
+			
+			m_forwardShader->launch( "adamOptimize", adamArgs, div_round_up( nAdam, 64 ), 1, 1, 64, 1, 1, stream );
 		}
 		void foward( oroStream stream, const Mat& input, Mat* output )
 		{
-
 			if( m_grid )
 			{
 				for( int level = 0; level < m_grid->m_config.L; ++level )
@@ -737,6 +590,7 @@ namespace rpml
 		std::unique_ptr<Buffer> m_inputRefBuffer;
 		std::unique_ptr<Buffer> m_intermediateBuffer;
 		std::unique_ptr<Buffer> m_dmatBuffer;
+		std::unique_ptr<Buffer> m_adamBuffer;
 		std::vector<GPUMat> m_Is;
 
 		const FrequencyEncoder* m_frequency = 0;
@@ -744,5 +598,7 @@ namespace rpml
 
 		std::unique_ptr<Buffer> m_gridBuffer;
 		std::unique_ptr<Shader> m_forwardShader;
+
+		int m_iteration = 0;
 	};
-	}
+}
