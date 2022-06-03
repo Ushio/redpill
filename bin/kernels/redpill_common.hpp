@@ -42,21 +42,14 @@ namespace rpml
 		int m_col; // = outputs
 		int m_location;
 	};
-    struct MLPForwardFusedArg
+    struct MLPForwardArg
 	{
 		GPUMat inputMat;
 		GPUMat outputMat;
 		GPUMat m_Ws[16];
 		GPUMat m_Bs[16];
 		int nLayer;
-		int padd0;
-		int padd1;
-		int padd2;
-	};
-	struct MLPEncodingArg
-	{
-		int mode;
-		int frequency_N;
+		int encoder;
 		int padd1;
 		int padd2;
 	};

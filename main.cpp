@@ -259,8 +259,6 @@ int main()
 				   .encoderType( EncoderType::Frequency ),
 			pr::GetDataPath( "kernels" ) );
 
-	// MLP_GPU_Forward mlpx( mlp, pr::GetDataPath( "kernels" ) );
-
 	Config config;
 	config.ScreenWidth = 1500;
 	config.ScreenHeight = 1200;
@@ -348,8 +346,7 @@ int main()
 				inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
 			}
 		}
-		// mlpx.foward( stream, inUVs, &outColors );
-		// mlpg.fowardNaive( stream, inUVs, &outColors, mlp );
+		// mlpg.takeReference( mlp );
 		mlpg.foward( stream, inUVs, &outColors );
 
 		for( int yi = 0; yi < estimatorHeight; yi++ )

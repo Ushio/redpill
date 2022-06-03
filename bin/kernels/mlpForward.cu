@@ -261,7 +261,7 @@ extern "C" __global__ void adamOptimize( float* matBuffer, float* dMatBuffer, Ad
     }
 }
 
-extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, float* gridFeature, MLPForwardFusedArg mlpForwardFusedArg, MLPEncodingArg mlpEncoding ) 
+extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, float* gridFeature, MLPForwardArg arg ) 
 {
     __shared__ float tensor[64 * SHARED_TENSOR_ROW];
 
@@ -270,15 +270,15 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
 
     float value[SHARED_TENSOR_ROW];
     
-    if( xi < mlpForwardFusedArg.inputMat.m_col )
+    if( xi < arg.inputMat.m_col )
     {
         float vs[SHARED_TENSOR_ROW];
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             int yi = yi_global_base + yi_local;
-            if( yi < mlpForwardFusedArg.inputMat.m_row )
+            if( yi < arg.inputMat.m_row )
             {
-                vs[yi_local] = inputs[elem( xi, yi, mlpForwardFusedArg.inputMat)];
+                vs[yi_local] = inputs[elem( xi, yi, arg.inputMat)];
             }
             else
             {
@@ -292,9 +292,9 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
     }
     __syncthreads();
 
-    if( mlpEncoding.mode == 1 ) // frequency
+    if( arg.encoder == 1 ) // frequency
     {
-        Frequency frequency( mlpForwardFusedArg.inputMat.m_col, xi, mlpEncoding.frequency_N );
+        Frequency frequency( arg.inputMat.m_col, xi, FREQ_N );
         
         if( xi < frequency.outputDim() )
         {
@@ -314,7 +314,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         }
         __syncthreads();
     }
-    if( mlpEncoding.mode == 2 ) // Multi Resolution Hash
+    if( arg.encoder == 2 ) // Multi Resolution Hash
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
@@ -349,12 +349,12 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         __syncthreads();
     }
     
-    for( int i = 0 ; i < mlpForwardFusedArg.nLayer ; i++ )
+    for( int i = 0 ; i < arg.nLayer ; i++ )
     {
-        int row = mlpForwardFusedArg.m_Ws[i].m_row; // input
-        int col = mlpForwardFusedArg.m_Ws[i].m_col; // output
+        int row = arg.m_Ws[i].m_row; // input
+        int col = arg.m_Ws[i].m_col; // output
 
-        float bias = xi < col ? matBuffer[ elem( xi, 0, mlpForwardFusedArg.m_Bs[i] ) ] : 0.0f;
+        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             value[yi_local] = bias;
@@ -364,7 +364,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         {
             for( int j = 0 ; j < row ; j++ ) 
             {
-                float b = matBuffer[ elem( xi /* output xi */, j, mlpForwardFusedArg.m_Ws[i] ) ];
+                float b = matBuffer[ elem( xi /* output xi */, j, arg.m_Ws[i] ) ];
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
                     float a = getTensor( tensor, j, yi_local );
@@ -372,7 +372,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
                 }
             }
             
-            float lowerbounds = i + 1 != mlpForwardFusedArg.nLayer ? 0.0f : -3.40282e+38f;
+            float lowerbounds = i + 1 != arg.nLayer ? 0.0f : -3.40282e+38f;
             for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
             {
                 value[yi_local] = fmaxf( value[yi_local], lowerbounds );
@@ -391,7 +391,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         __syncthreads();
     }
 
-    if( xi < mlpForwardFusedArg.outputMat.m_col )
+    if( xi < arg.outputMat.m_col )
     {
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
@@ -400,9 +400,9 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             int yi = yi_global_base + yi_local;
-            if( yi < mlpForwardFusedArg.outputMat.m_row )
+            if( yi < arg.outputMat.m_row )
             {
-                output[ elem( xi, yi, mlpForwardFusedArg.outputMat )] = value[yi_local];
+                output[ elem( xi, yi, arg.outputMat )] = value[yi_local];
             }
         }
     }

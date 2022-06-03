@@ -2,7 +2,8 @@
 
 #include "redpill.hpp"
 #include <Orochi/Orochi.h>
-
+#include <queue>
+#include <memory>
 #include <intrin.h>
 #define RPMLX_ASSERT( ExpectTrue ) \
 	if( ( ExpectTrue ) == 0 )     \
@@ -190,173 +191,24 @@ namespace rpml
 		std::map<std::string, oroFunction> m_functions;
 	};
 
-	// assume Relu
-	class MLP_GPU_Forward
-	{
-	public:
-		MLP_GPU_Forward( const MLP& mlp, std::string kernels )
-		{
-			bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
-			std::vector<std::string> macros;
-			if( hasEncoder )
-			{
-				auto f = dynamic_cast<const FrequencyEncoder*>( mlp.m_layers[0].get() );
-				if( f )
-				{
-					m_frequency = f;
-				}
-
-				auto g = dynamic_cast<const MultiResolutionHashEncoder*>( mlp.m_layers[0].get() );
-				if( g )
-				{
-					m_grid = g;
-
-					int bytesPerTable = g->m_config.T * g->m_config.F * sizeof( float );
-					m_gridBuffer = std::unique_ptr<Buffer>( new Buffer( bytesPerTable * g->m_config.L ) );
-
-					macros.push_back( "-DGRID_INPUT_DIM=" + std::to_string( mlp.m_layers[0]->inputDimensions() ) );
-					macros.push_back( "-DGRID_L=" + std::to_string( g->m_config.L ) );
-					macros.push_back( "-DGRID_T=" + std::to_string( g->m_config.T ) );
-					macros.push_back( "-DGRID_F=" + std::to_string( g->m_config.F ) );
-					macros.push_back( "-DGRID_NMIN=(float)(" + std::to_string( g->m_config.Nmin ) + ")" );
-					macros.push_back( "-DGRID_B=(float)(" + std::to_string( g->m_config.b ) + ")" );
-				}
-			}
-
-			int location = 0;
-			for( int i = ( hasEncoder ? 1 : 0 ); i < mlp.m_layers.size() ; i += 2 )
-			{
-				auto affineLayer = dynamic_cast<const AffineLayer*>( mlp.m_layers[i].get() );
-
-				GPUMat w;
-				w.m_location = location;
-				w.m_row = affineLayer->m_W.row();
-				w.m_paddedRow = affineLayer->m_W.paddedRow();
-				w.m_col = affineLayer->m_W.col();
-				location += w.m_paddedRow * w.m_col;
-
-				GPUMat b;
-				b.m_location = location;
-				b.m_row = affineLayer->m_b.row();
-				b.m_paddedRow = affineLayer->m_b.paddedRow();
-				b.m_col = affineLayer->m_b.col();
-				location += b.m_paddedRow * b.m_col;
-				
-				m_Ws.push_back( w );
-				m_Bs.push_back( b );
-				m_affineLayers.push_back( affineLayer );
-			}
-
-			m_matBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
-
-			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release ) );
-		}
-		void foward( oroStream stream, const Mat& input, Mat* output )
-		{
-			for( int i = 0; i < m_affineLayers.size(); ++i )
-			{
-				oroMemcpyHtoDAsync( ( oroDeviceptr )( m_matBuffer->data() + m_Ws[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_W.data(), m_affineLayers[i]->m_W.bytes(), stream );
-				oroMemcpyHtoDAsync( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[i].m_location * sizeof( float ) ), (void*)m_affineLayers[i]->m_b.data(), m_affineLayers[i]->m_b.bytes(), stream );
-			}
-			if( m_grid )
-			{
-				for( int level = 0; level < m_grid->m_config.L; ++level )
-				{
-					const Mat& feature = m_grid->m_features[level];
-
-					int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * level;
-					for( int fi = 0; fi < m_grid->m_config.F; ++fi )
-					{
-						int bytesPerFeature = m_grid->m_config.T * sizeof( float );
-						oroMemcpyHtoDAsync( ( oroDeviceptr )( m_gridBuffer->data() + baseLevel + bytesPerFeature * fi ), (void*)&feature( fi, 0 ), bytesPerFeature, stream );
-					}
-				}
-			}
-
-			int row = input.row();
-			int paddedRow = input.paddedRow();
-
-			GPUMat inputGPU;
-			inputGPU.m_location = 0;
-			inputGPU.m_row = row;
-			inputGPU.m_paddedRow = paddedRow;
-			inputGPU.m_col = input.col();
-
-			if( !m_inputBuffer || m_inputBuffer->bytes() < input.bytes() )
-			{
-				m_inputBuffer = std::unique_ptr<Buffer>( new Buffer( input.bytes() ) );
-			}
-
-			oroMemcpyHtoDAsync( (oroDeviceptr)m_inputBuffer->data(), (void*)input.data(), input.bytes(), stream );
-
-			GPUMat outputGPU;
-			outputGPU.m_location = 0;
-			outputGPU.m_row = row;
-			outputGPU.m_paddedRow = paddedRow;
-			outputGPU.m_col = m_affineLayers[m_affineLayers.size() - 1]->m_W.col();
-			int64_t outputGPUBytes = (int64_t)outputGPU.m_paddedRow * outputGPU.m_col * sizeof(float);
-			if( !m_outputBuffer || m_outputBuffer->bytes() < outputGPUBytes )
-			{
-				m_outputBuffer = std::unique_ptr<Buffer>( new Buffer( outputGPUBytes ) );
-			}
-
-			MLPForwardFusedArg arg;
-			arg.inputMat = inputGPU;
-			arg.outputMat = outputGPU;
-			for( int i = 0; i < m_affineLayers.size(); ++i )
-			{
-				arg.m_Ws[i] = m_Ws[i];
-				arg.m_Bs[i] = m_Bs[i];
-			}
-			arg.nLayer = m_affineLayers.size();
-
-			MLPEncodingArg encoding = {};
-			if( m_frequency )
-			{
-				encoding.mode = 1;
-				encoding.frequency_N = m_frequency->m_config.N;
-			}
-			if( m_grid )
-			{
-				encoding.mode = 2;
-			}
-
-			ShaderArgument args;
-			args.add( m_inputBuffer->data() );
-			args.add( m_outputBuffer->data() );
-			args.add( m_matBuffer->data() );
-			args.add( m_gridBuffer ? m_gridBuffer->data() : nullptr );
-			args.add( arg );
-			args.add( encoding );
-
-			int numberOfGrid = div_round_up( row, SHARED_TENSOR_ROW );
-			m_forwardShader->launch( "forward", args, numberOfGrid, 1, 1, 1, 64, 1, stream );
-
-			output->setShape( outputGPU.m_row, outputGPU.m_col );
-
-			oroMemcpyDtoHAsync( output->data(), (oroDeviceptr)m_outputBuffer->data(), output->bytes(), stream );
-
-			oroStreamSynchronize( stream );
-		}
-
-		std::unique_ptr<Buffer> m_inputBuffer;
-		std::unique_ptr<Buffer> m_outputBuffer;
-		std::unique_ptr<Buffer> m_matBuffer;
-		std::vector<char> m_matBufferSrc;
-		std::vector<GPUMat> m_Ws;
-		std::vector<GPUMat> m_Bs;
-		
-		const FrequencyEncoder* m_frequency = 0;
-		const MultiResolutionHashEncoder* m_grid = 0;
-		std::vector<const AffineLayer*> m_affineLayers;
-
-		std::unique_ptr<Buffer> m_gridBuffer;
-		std::unique_ptr<Shader> m_forwardShader;
-	};
-
 	class MLPg
 	{
 	public:
+		struct LearningTask 
+		{
+			oroEvent learnEvent = 0;
+			Mat input;
+			Mat refs;
+			void wait()
+			{
+				if( learnEvent )
+				{
+					oroEventSynchronize( learnEvent );
+					oroEventDestroy( learnEvent );
+					learnEvent = 0;
+				}
+			}
+		};
 		MLPg( const MLPConfig& config, std::string kernels ) : m_config(config)
 		{
 			//bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
@@ -473,8 +325,20 @@ namespace rpml
 			{
 				m_intermediateBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			}
-			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputGPU.m_location * sizeof( float ) ), (void*)input.data(), input.bytes(), stream );
-			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputRefGPU.m_location * sizeof( float ) ), (void*)refs.data(), refs.bytes(), stream );
+			 
+			while( 64 < m_learningQueue.size() )
+			{
+				std::shared_ptr<LearningTask> task = m_learningQueue.front();
+				m_learningQueue.pop();
+				task->wait();
+			}
+
+			std::shared_ptr<LearningTask> task = std::shared_ptr<LearningTask>( new LearningTask() );
+			oroEventCreateWithFlags( &task->learnEvent, 0 );
+			task->input = input;
+			task->refs = refs;
+			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputGPU.m_location * sizeof( float ) ), (void*)task->input.data(), task->input.bytes(), stream );
+			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputRefGPU.m_location * sizeof( float ) ), (void*)task->refs.data(), task->refs.bytes(), stream );			
 			oroMemsetD8Async( (oroDeviceptr)m_dmatBuffer->data(), 0, m_dmatBuffer->bytes(), stream );
 
 			MLPTrainArg arg;
@@ -519,10 +383,39 @@ namespace rpml
 			adamArgs.add( nAdam );
 			
 			m_forwardShader->launch( "adamOptimize", adamArgs, div_round_up( nAdam, 64 ), 1, 1, 64, 1, 1, stream );
-	
+
+			oroEventRecord( task->learnEvent, stream );
+			m_learningQueue.push( task );
+		}
+		void synchronizeLearning()
+		{
+			while( 0 < m_learningQueue.size() )
+			{
+				std::shared_ptr<LearningTask> task = m_learningQueue.front();
+				m_learningQueue.pop();
+				task->wait();
+			}
+		}
+		void takeReference( const MLP& mlp )
+		{
+			bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
+			int location = 0;
+			std::vector<const AffineLayer*> affineLayers;
+			for( int i = ( hasEncoder ? 1 : 0 ); i < mlp.m_layers.size(); i += 2 )
+			{
+				auto affineLayer = dynamic_cast<const AffineLayer*>( mlp.m_layers[i].get() );
+				affineLayers.push_back( affineLayer );
+			}
+			for( int i = 0; i < affineLayers.size(); ++i )
+			{
+				oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Ws[i].m_location * sizeof( float ) ), (void*)affineLayers[i]->m_W.data(), affineLayers[i]->m_W.bytes() );
+				oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[i].m_location * sizeof( float ) ), (void*)affineLayers[i]->m_b.data(), affineLayers[i]->m_b.bytes() );
+			}
 		}
 		void foward( oroStream stream, const Mat& input, Mat* output )
 		{
+			synchronizeLearning();
+
 			//if( m_grid )
 			//{
 			//	for( int level = 0; level < m_grid->m_config.L; ++level )
@@ -565,7 +458,7 @@ namespace rpml
 				m_outputBuffer = std::unique_ptr<Buffer>( new Buffer( outputGPUBytes ) );
 			}
 
-			MLPForwardFusedArg arg;
+			MLPForwardArg arg;
 			arg.inputMat = inputGPU;
 			arg.outputMat = outputGPU;
 			for( int i = 0; i < m_Ws.size(); ++i )
@@ -575,18 +468,11 @@ namespace rpml
 			}
 			arg.nLayer = m_Ws.size();
 
-			MLPEncodingArg encoding = {};
-			encoding.mode = 0;
+			arg.encoder = 0;
 			if( m_config.m_encoderType == EncoderType::Frequency )
 			{
-				encoding.mode = 1;
-				encoding.frequency_N = m_config.m_frequencyEncoderConfig.N;
+				arg.encoder = 1;
 			}
-			//if( m_frequency )
-			//{
-			//	encoding.mode = 1;
-			//	encoding.frequency_N = m_frequency->m_config.N;
-			//}
 			//if( m_grid )
 			//{
 			//	encoding.mode = 2;
@@ -598,7 +484,6 @@ namespace rpml
 			args.add( m_matBuffer->data() );
 			args.add( m_gridBuffer ? m_gridBuffer->data() : nullptr );
 			args.add( arg );
-			args.add( encoding );
 
 			int gridDim = div_round_up( row, SHARED_TENSOR_ROW );
 			m_forwardShader->launch( "forward", args, gridDim, 1, 1, 1, 64, 1, stream );
@@ -622,6 +507,7 @@ namespace rpml
 		std::unique_ptr<Buffer> m_dmatBuffer;
 		std::unique_ptr<Buffer> m_adamBuffer;
 		std::vector<GPUMat> m_Is;
+		std::queue<std::shared_ptr<LearningTask>> m_learningQueue;
 
 		//const FrequencyEncoder* m_frequency = 0;
 		//const MultiResolutionHashEncoder* m_grid = 0;
