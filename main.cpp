@@ -203,7 +203,8 @@ int main()
 				 .learningRate( 10.0f )
 				 .initType( InitializationType::He )
 				 .optimType( OptimizerType::Adam )
-				 .activationType( ActivationType::ReLU ) );
+				 .activationType( ActivationType::ReLU )
+				 .encoderType( EncoderType::Frequency ) );
 
 
 	//MLP mlp( MLPConfig()
@@ -254,10 +255,11 @@ int main()
 				.learningRate( 10.0f )
 				.initType( InitializationType::He )
 				.optimType( OptimizerType::Adam )
-				.activationType( ActivationType::ReLU ),
+				   .activationType( ActivationType::ReLU )
+				   .encoderType( EncoderType::Frequency ),
 			pr::GetDataPath( "kernels" ) );
 
-	//MLP_GPU_Forward mlpx( mlp, pr::GetDataPath( "kernels" ) );
+	// MLP_GPU_Forward mlpx( mlp, pr::GetDataPath( "kernels" ) );
 
 	Config config;
 	config.ScreenWidth = 1500;

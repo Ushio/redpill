@@ -5,11 +5,19 @@
 #define DEVICE __device__
 #define DEVICE_INLINE __device__ inline
 typedef unsigned int uint32_t;
+
+#define INTRIN_SINF( x ) __sinf( x )
+#define INTRIN_COSF( x ) __cosf( x )
+#define INTRIN_POWF( x, y ) __powf( x, y )
 #else
 #define IS_HOST 1
 #define DEVICE
 #define DEVICE_INLINE inline
 #include <cstdint>
+
+#define INTRIN_SINF( x ) std::sinf( x )
+#define INTRIN_COSF( x ) std::cosf( x )
+#define INTRIN_POWF( x, y ) std::powf( x, y )
 #endif
 
 #define SHARED_TENSOR_ROW 16
@@ -60,7 +68,7 @@ namespace rpml
 		GPUMat m_Bs[16];
 		GPUMat m_Is[16];
 		int nLayer;
-		int padd0;
+		int encoder;
 		int padd1;
 		int padd2;
 	};
@@ -166,5 +174,50 @@ namespace rpml
 			float v_hat = v / ( 1.0f - beta2t );
 			return value - s * m_hat / ( sqrt( v_hat ) + ADAM_E );
 		}
+	};
+
+	// float encode_frequency( int inputDim, int xi, )
+	DEVICE_INLINE
+	int frequencyOutputDim( int inputDim, int N )
+	{
+		return inputDim * N * 2;
+	}
+
+	// [ sin( 2*pi*x ), cos( 2*pi*x ), sin( 4*pi*x ), cos( 4*pi*x )... sin( 2*pi*y ), cos( 2*pi*y )... ]
+	struct Frequency
+	{
+		DEVICE
+		Frequency( int inputDim, int xi, int N )
+		:m_inputDim( inputDim )
+		,m_xi( xi )
+		,m_N( N )
+		{
+		}
+
+		DEVICE
+		int dimIwant() const
+		{
+			return m_xi / ( m_N * 2 );
+		}
+
+		DEVICE
+		float encode( float v ) const
+		{
+			int baseDim = m_xi % ( m_N * 2 );
+			int i = baseDim / 2;
+			float k = 2.0f * pi * INTRIN_POWF( 2.0f, (float)i );
+			float theta = k * v;
+			if( baseDim % 2 ) { theta += pi * 0.5f; }
+			return INTRIN_SINF( theta );
+		}
+
+		DEVICE
+		int outputDim() const
+		{
+			return frequencyOutputDim( m_inputDim, m_N );
+		}
+		int m_inputDim;
+		int m_xi;
+		int m_N;
 	};
 }

@@ -988,26 +988,21 @@ namespace rpml
 		{
 			int N = 12;
 		};
-		static int output( int input, const Config& config )
-		{
-			return input * config.N * 2;
-		}
 		FrequencyEncoder( int i, int o, const Config& config ) : Layer( i, o ), m_config( config ) {}
 
 		virtual void forward( Mat* r, const Mat& value, MatContext* context )
 		{
 			( *r ).setShape( value.row(), outputDimensions() );
-			FOR_EACH_ELEMENT( value, ix, iy )
-			{
-				float x = value( ix, iy );
 
-				for( int i = 0; i < m_config.N ; i++ )
+			int inputDim = inputDimensions();
+			int outputDim = outputDimensions();
+			for( int xi = 0; xi < outputDim; xi++ )
+			{
+				Frequency frequency( inputDim, xi, m_config.N );
+				for( int iy = 0; iy < value.row(); iy++ )
 				{
-					float k = 2.0f * pi * std::pow( 2.0f, i );
-					float a = std::sin( k * x );
-					float b = std::cos( k * x );
-					( *r )( ix * m_config.N * 2 + i * 2 + 0, iy ) = a;
-					( *r )( ix * m_config.N * 2 + i * 2 + 1, iy ) = b;
+					float v = value( frequency.dimIwant(), iy );
+					( *r )( xi, iy ) = frequency.encode( v );
 				}
 			}
 		}
@@ -1313,7 +1308,7 @@ namespace rpml
 				{
 					if( config.m_encoderType == EncoderType::Frequency )
 					{
-						int encoderOutput = FrequencyEncoder::output( input, config.m_frequencyEncoderConfig );
+						int encoderOutput = frequencyOutputDim( input, config.m_frequencyEncoderConfig.N );
 						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new FrequencyEncoder( input, encoderOutput, config.m_frequencyEncoderConfig ) );
 						encoder->initialize( config.m_initType, rng.get() );
 						m_layers.emplace_back( std::move( encoder ) );

@@ -9,6 +9,10 @@
     #define GRID_B 2.0f
 #endif
 
+#ifndef FREQ_N 
+#define FREQ_N 2
+#endif
+
 DEVICE
 float getTensor( float* tensor, int xi, int yi )
 {
@@ -53,6 +57,38 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
     }
     __syncthreads();
 
+    if( mlpTrainArg.encoder == 0 )
+    {
+        // This case, mlpTrainArg.m_Is[0] == inputMat
+    }
+    else if( mlpTrainArg.encoder == 1 ) // frequency
+    {
+        Frequency frequency( mlpTrainArg.inputMat.m_col, xi, FREQ_N );
+        
+        if( xi < frequency.outputDim() )
+        {
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                float v = getTensor( tensor, frequency.dimIwant(), yi_local );
+                value[yi_local] = frequency.encode( v );
+            }
+        }
+        __syncthreads();
+        if( xi < frequency.outputDim() )
+        {
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                setTensor( tensor, xi, yi_local, value[yi_local] );
+                int yi = yi_global_base + yi_local;
+                if( yi < mlpTrainArg.inputMat.m_row )
+                {
+                    intermediates[elem( xi, yi, mlpTrainArg.m_Is[0] )] = value[yi_local];
+                }
+            }
+        }
+        __syncthreads();
+    }
+
     for( int i = 0 ; i < mlpTrainArg.nLayer ; i++ )
     {
         int row = mlpTrainArg.m_Ws[i].m_row; // input
@@ -91,7 +127,10 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
             {
                 setTensor( tensor, xi, yi_local, value[yi_local] );
                 int yi = yi_global_base + yi_local;
-                intermediates[elem( xi, yi, mlpTrainArg.m_Is[i + 1] )] = value[yi_local];
+                if( yi < mlpTrainArg.inputMat.m_row )
+                {
+                    intermediates[elem( xi, yi, mlpTrainArg.m_Is[i + 1] )] = value[yi_local];
+                }
             }
         }
         __syncthreads();
@@ -169,7 +208,11 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
                     int yi = yi_global_base + yi_local;
-                    float X = intermediates[elem( yi_W, yi, mlpTrainArg.m_Is[i] /* input Xs */ )];
+                    float X = 0.0f;
+                    if( yi < mlpTrainArg.inputMat.m_row )
+                    {
+                        X = intermediates[elem( yi_W, yi, mlpTrainArg.m_Is[i] /* input Xs */ )];
+                    }
                     float Y = getTensor( tensor, xi, yi_local );
                     dW = fma( X, Y, dW );
                 }
@@ -251,24 +294,18 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
 
     if( mlpEncoding.mode == 1 ) // frequency
     {
-        int outputCol = mlpForwardFusedArg.inputMat.m_col * mlpEncoding.frequency_N * 2;
+        Frequency frequency( mlpForwardFusedArg.inputMat.m_col, xi, mlpEncoding.frequency_N );
         
-        if( xi < outputCol )
+        if( xi < frequency.outputDim() )
         {
             for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
             {
-                int xi_src = xi / ( mlpEncoding.frequency_N * 2 );
-                int baseEachDim = xi % ( mlpEncoding.frequency_N * 2 );
-                int i = baseEachDim / 2;
-                int tri_idx = baseEachDim % 2;
-                float v = getTensor( tensor, xi_src, yi_local );
-                float k = 2.0f * pi * __powf( 2.0f, (float)i );
-                v = __sinf( k * v + ( tri_idx ? pi * 0.5f : 0.0f ) );
-                value[yi_local] = v;
+                float v = getTensor( tensor, frequency.dimIwant(), yi_local );
+                value[yi_local] = frequency.encode( v );
             }
         }
         __syncthreads();
-        if( xi < outputCol )
+        if( xi < frequency.outputDim() )
         {
             for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
             {

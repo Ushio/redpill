@@ -357,7 +357,7 @@ namespace rpml
 	class MLPg
 	{
 	public:
-		MLPg( const MLPConfig& config, std::string kernels )
+		MLPg( const MLPConfig& config, std::string kernels ) : m_config(config)
 		{
 			//bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
 			//std::vector<std::string> macros;
@@ -387,11 +387,20 @@ namespace rpml
 			//}
 			std::vector<std::string> macros;
 
+			if( config.m_encoderType == EncoderType::Frequency )
+			{
+				macros.push_back( "-DFREQ_N=" + std::to_string( config.m_frequencyEncoderConfig.N ) );
+			}
+
 			int location = 0;
 			for( int i = 0; i < config.m_shape.size() - 1; i++ )
 			{
 				int input = config.m_shape[i];
 				int output = config.m_shape[i + 1];
+				if( i == 0 && config.m_encoderType == EncoderType::Frequency )
+				{
+					input = frequencyOutputDim( input, config.m_frequencyEncoderConfig.N );
+				}
 
 				GPUMat w = allocateGPUMat( &location, input, output );
 				GPUMat b = allocateGPUMat( &location, 1, output );
@@ -408,9 +417,9 @@ namespace rpml
 			// initialization
 			StandardRng rng;
 			std::vector<float> matBuffer( location );
-			for( int i = 0; i < config.m_shape.size() - 1; i++ )
+			for( int i = 0; i < m_Ws.size(); i++ )
 			{
-				int input = config.m_shape[i];
+				int input = m_Ws[i].m_row;
 
 				float s = std::sqrt( 2.0f / (float)input );
 				BoxMular m( &rng );
@@ -440,7 +449,17 @@ namespace rpml
 
 			int location = 0;
 			GPUMat inputGPU = allocateGPUMat( &location, input.row(), input.col() );
-			m_Is.push_back( inputGPU );
+			if( m_config.m_encoderType == EncoderType::None )
+			{
+				m_Is.push_back( inputGPU );
+			}
+			else if( m_config.m_encoderType == EncoderType::Frequency )
+			{
+				int output = frequencyOutputDim( input.col(), m_config.m_frequencyEncoderConfig.N );
+				GPUMat encoded = allocateGPUMat( &location, input.row(), output );
+				m_Is.push_back( encoded );
+			}
+
 			for( int i = 0; i < m_Ws.size(); ++i )
 			{
 				int outputs = m_Ws[i].m_col;
@@ -454,7 +473,7 @@ namespace rpml
 			{
 				m_intermediateBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			}
-			oroMemcpyHtoDAsync( ( oroDeviceptr )m_intermediateBuffer->data(), (void*)input.data(), input.bytes(), stream );
+			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputGPU.m_location * sizeof( float ) ), (void*)input.data(), input.bytes(), stream );
 			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputRefGPU.m_location * sizeof( float ) ), (void*)refs.data(), refs.bytes(), stream );
 			oroMemsetD8Async( (oroDeviceptr)m_dmatBuffer->data(), 0, m_dmatBuffer->bytes(), stream );
 
@@ -471,6 +490,11 @@ namespace rpml
 				arg.m_Is[i] = m_Is[i];
 			}
 			arg.nLayer = m_Ws.size();
+			arg.encoder = 0;
+			if( m_config.m_encoderType == EncoderType::Frequency )
+			{
+				arg.encoder = 1;
+			}
 
 			ShaderArgument trainArgs;
 			trainArgs.add( m_matBuffer->data() );
@@ -480,7 +504,6 @@ namespace rpml
 
 			int gridDim = div_round_up( input.row(), SHARED_TENSOR_ROW );
 			m_forwardShader->launch( "train", trainArgs, gridDim, 1, 1, 1, 64, 1, stream );
-
 			m_iteration++;
 			float beta1t = pow( ADAM_BETA1, m_iteration );
 			float beta2t = pow( ADAM_BETA2, m_iteration );
@@ -490,29 +513,30 @@ namespace rpml
 			adamArgs.add( m_matBuffer->data() );
 			adamArgs.add( m_dmatBuffer->data() );
 			adamArgs.add( m_adamBuffer->data() );
-			adamArgs.add( 10.0f / input.row() );
+			adamArgs.add( m_config.m_learningRate / input.row() );
 			adamArgs.add( beta1t );
 			adamArgs.add( beta2t );
 			adamArgs.add( nAdam );
 			
 			m_forwardShader->launch( "adamOptimize", adamArgs, div_round_up( nAdam, 64 ), 1, 1, 64, 1, 1, stream );
+	
 		}
 		void foward( oroStream stream, const Mat& input, Mat* output )
 		{
-			if( m_grid )
-			{
-				for( int level = 0; level < m_grid->m_config.L; ++level )
-				{
-					const Mat& feature = m_grid->m_features[level];
+			//if( m_grid )
+			//{
+			//	for( int level = 0; level < m_grid->m_config.L; ++level )
+			//	{
+			//		const Mat& feature = m_grid->m_features[level];
 
-					int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * level;
-					for( int fi = 0; fi < m_grid->m_config.F; ++fi )
-					{
-						int bytesPerFeature = m_grid->m_config.T * sizeof( float );
-						oroMemcpyHtoDAsync( ( oroDeviceptr )( m_gridBuffer->data() + baseLevel + bytesPerFeature * fi ), (void*)&feature( fi, 0 ), bytesPerFeature, stream );
-					}
-				}
-			}
+			//		int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * level;
+			//		for( int fi = 0; fi < m_grid->m_config.F; ++fi )
+			//		{
+			//			int bytesPerFeature = m_grid->m_config.T * sizeof( float );
+			//			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_gridBuffer->data() + baseLevel + bytesPerFeature * fi ), (void*)&feature( fi, 0 ), bytesPerFeature, stream );
+			//		}
+			//	}
+			//}
 
 			int row = input.row();
 			int paddedRow = input.paddedRow();
@@ -552,15 +576,21 @@ namespace rpml
 			arg.nLayer = m_Ws.size();
 
 			MLPEncodingArg encoding = {};
-			if( m_frequency )
+			encoding.mode = 0;
+			if( m_config.m_encoderType == EncoderType::Frequency )
 			{
 				encoding.mode = 1;
-				encoding.frequency_N = m_frequency->m_config.N;
+				encoding.frequency_N = m_config.m_frequencyEncoderConfig.N;
 			}
-			if( m_grid )
-			{
-				encoding.mode = 2;
-			}
+			//if( m_frequency )
+			//{
+			//	encoding.mode = 1;
+			//	encoding.frequency_N = m_frequency->m_config.N;
+			//}
+			//if( m_grid )
+			//{
+			//	encoding.mode = 2;
+			//}
 
 			ShaderArgument args;
 			args.add( m_inputBuffer->data() );
@@ -593,12 +623,13 @@ namespace rpml
 		std::unique_ptr<Buffer> m_adamBuffer;
 		std::vector<GPUMat> m_Is;
 
-		const FrequencyEncoder* m_frequency = 0;
-		const MultiResolutionHashEncoder* m_grid = 0;
+		//const FrequencyEncoder* m_frequency = 0;
+		//const MultiResolutionHashEncoder* m_grid = 0;
 
 		std::unique_ptr<Buffer> m_gridBuffer;
 		std::unique_ptr<Shader> m_forwardShader;
 
 		int m_iteration = 0;
+		MLPConfig m_config;
 	};
 }
