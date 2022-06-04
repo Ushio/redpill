@@ -60,12 +60,6 @@ namespace rpml
 		Tanh,
 		Sigmoid
 	};
-	enum class EncoderType
-	{
-		None,
-		Frequency,
-		MultiResolutionHash
-	};
 
 
 	//inline int div_round_up( int val, int divisor )
@@ -1268,6 +1262,7 @@ namespace rpml
 		OptimizerType m_optimType = OptimizerType::Adam;
 		EncoderType m_encoderType = EncoderType::None;
 		FrequencyEncoder::Config m_frequencyEncoderConfig;
+		MultiResolutionHashEncoder::Config m_multiResolutionHashConfig;
 
 #define PROP( name ) \
 		MLPConfig& name( const decltype( m_##name )& name ) \
@@ -1283,6 +1278,7 @@ namespace rpml
 		PROP( initType );
 		PROP( encoderType );
 		PROP( frequencyEncoderConfig );
+		PROP( multiResolutionHashConfig );
 #undef PROP
 	};
 
@@ -1317,7 +1313,7 @@ namespace rpml
 					}
 					else if( config.m_encoderType == EncoderType::MultiResolutionHash )
 					{
-						int encoderOutput = MultiResolutionHashEncoder::output( input, MultiResolutionHashEncoder::Config() );
+						int encoderOutput = MultiResolutionHashEncoder::output( input, config.m_multiResolutionHashConfig );
 						std::unique_ptr<Layer> encoder = std::unique_ptr<Layer>( new MultiResolutionHashEncoder( input, encoderOutput, MultiResolutionHashEncoder::Config(), config.m_learningRate ) );
 						encoder->initialize( config.m_initType, rng.get() );
 						m_layers.emplace_back( std::move( encoder ) );

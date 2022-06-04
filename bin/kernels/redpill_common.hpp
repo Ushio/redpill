@@ -27,6 +27,13 @@ namespace rpml
 	const int GPU_MAT_ALIGNMENT = 8;
 	const float pi = 3.14159265358979323846f;
 
+	enum class EncoderType
+	{
+		None,
+		Frequency,
+		MultiResolutionHash
+	};
+
     DEVICE_INLINE int div_round_up( int val, int divisor )
     {
         return ( val + divisor - 1 ) / divisor;
@@ -49,8 +56,8 @@ namespace rpml
 		GPUMat m_Ws[16];
 		GPUMat m_Bs[16];
 		int nLayer;
-		int encoder;
-		int padd1;
+		EncoderType encoder;
+		int gridFeatureLocation;
 		int padd2;
 	};
 	struct MLPTrainArg
@@ -61,7 +68,7 @@ namespace rpml
 		GPUMat m_Bs[16];
 		GPUMat m_Is[16];
 		int nLayer;
-		int encoder;
+		EncoderType encoder;
 		int padd1;
 		int padd2;
 	};
@@ -213,4 +220,10 @@ namespace rpml
 		int m_xi;
 		int m_N;
 	};
+
+	DEVICE_INLINE
+	int multiResolutionHashOutputDim( int L, int F )
+	{
+		return L * F;
+	}
 }

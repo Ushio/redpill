@@ -198,13 +198,14 @@ int main()
 
 	ITexture *texture = CreateTexture();
 
-	MLP mlp( MLPConfig()
-				 .shape( { 2, 64, 64, 3 } )
-				 .learningRate( 10.0f )
-				 .initType( InitializationType::He )
-				 .optimType( OptimizerType::Adam )
-				 .activationType( ActivationType::ReLU )
-				 .encoderType( EncoderType::Frequency ) );
+	MLPConfig mlpConfig = MLPConfig()
+						   .shape( { 2, 64, 64, 3 } )
+						   .learningRate( 10.0f )
+						   .initType( InitializationType::He )
+						   .optimType( OptimizerType::Adam )
+						   .activationType( ActivationType::ReLU )
+						   .encoderType( EncoderType::MultiResolutionHash );
+	MLP mlp( mlpConfig );
 
 
 	//MLP mlp( MLPConfig()
@@ -250,13 +251,7 @@ int main()
 	oroGetDeviceProperties( &props, device );
 	printf( "GPU: %s\n", props.name );
 
-	MLPg mlpg( MLPConfig()
-				.shape( { 2, 64, 64, 3 } )
-				.learningRate( 10.0f )
-				.initType( InitializationType::He )
-				.optimType( OptimizerType::Adam )
-				   .activationType( ActivationType::ReLU )
-				   .encoderType( EncoderType::Frequency ),
+	MLPg mlpg( mlpConfig,
 			pr::GetDataPath( "kernels" ) );
 
 	Config config;
@@ -293,7 +288,7 @@ int main()
 		static int iterations = 0;
 
 		float loss = 0;
-		int NData = 256 * 8;
+		int NData = 256 * 8 + 1;
 		static Mat inputs( NData, 2 );
 		static Mat refs( NData, 3 );
 
@@ -317,8 +312,8 @@ int main()
 				refs( 2, i ) = y.z / 255.0f;
 			}
 			// printf( "sw_prepare %f\n", sw_prepare.elapsed() );
-			// loss = mlp.train( inputs, refs );
-			mlpg.train( stream, inputs, refs );
+			loss = mlp.train( inputs, refs );
+			// mlpg.train( stream, inputs, refs );
 
 			iterations++;
 		}
@@ -346,7 +341,7 @@ int main()
 				inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
 			}
 		}
-		// mlpg.takeReference( mlp );
+		mlpg.takeReference( mlp );
 		mlpg.foward( stream, inUVs, &outColors );
 
 		for( int yi = 0; yi < estimatorHeight; yi++ )

@@ -26,7 +26,7 @@ void setTensor( float* tensor, int xi, int yi, float value )
 
 using namespace rpml;
 
-extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* intermediates, MLPTrainArg mlpTrainArg ) 
+extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* intermediates, MLPTrainArg arg ) 
 {
     __shared__ float tensor[64 * SHARED_TENSOR_ROW];
 
@@ -37,15 +37,15 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
     
     // Load Input
 
-    if( xi < mlpTrainArg.inputMat.m_col )
+    if( xi < arg.inputMat.m_col )
     {
         float vs[SHARED_TENSOR_ROW];
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             int yi = yi_global_base + yi_local;
-            if( yi < mlpTrainArg.inputMat.m_row )
+            if( yi < arg.inputMat.m_row )
             {
-                vs[yi_local] = intermediates[elem( xi, yi, mlpTrainArg.inputMat)];
+                vs[yi_local] = intermediates[elem( xi, yi, arg.inputMat)];
             }
             else
             {
@@ -61,13 +61,13 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
 
     // Encording
 
-    if( mlpTrainArg.encoder == 0 )
+    if( arg.encoder == EncoderType::None )
     {
-        // This case, mlpTrainArg.m_Is[0] == inputMat
+        // This case, arg.m_Is[0] == inputMat
     }
-    else if( mlpTrainArg.encoder == 1 ) // frequency
+    else if( arg.encoder == EncoderType::Frequency )
     {
-        Frequency frequency( mlpTrainArg.inputMat.m_col, xi, FREQ_N );
+        Frequency frequency( arg.inputMat.m_col, xi, FREQ_N );
         
         if( xi < frequency.outputDim() )
         {
@@ -84,23 +84,27 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
             {
                 setTensor( tensor, xi, yi_local, value[yi_local] );
                 int yi = yi_global_base + yi_local;
-                if( yi < mlpTrainArg.inputMat.m_row )
+                if( yi < arg.inputMat.m_row )
                 {
-                    intermediates[elem( xi, yi, mlpTrainArg.m_Is[0] )] = value[yi_local];
+                    intermediates[elem( xi, yi, arg.m_Is[0] )] = value[yi_local];
                 }
             }
         }
         __syncthreads();
     }
+    else if( arg.encoder == EncoderType::MultiResolutionHash )
+    {
+
+    }
 
     // Forward
 
-    for( int i = 0 ; i < mlpTrainArg.nLayer ; i++ )
+    for( int i = 0 ; i < arg.nLayer ; i++ )
     {
-        int row = mlpTrainArg.m_Ws[i].m_row; // input
-        int col = mlpTrainArg.m_Ws[i].m_col; // output
+        int row = arg.m_Ws[i].m_row; // input
+        int col = arg.m_Ws[i].m_col; // output
 
-        float bias = xi < col ? matBuffer[ elem( xi, 0, mlpTrainArg.m_Bs[i] ) ] : 0.0f;
+        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             value[yi_local] = bias;
@@ -110,7 +114,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
         {
             for( int j = 0 ; j < row ; j++ ) 
             {
-                float b = matBuffer[ elem( xi /* output xi */, j, mlpTrainArg.m_Ws[i] ) ];
+                float b = matBuffer[ elem( xi /* output xi */, j, arg.m_Ws[i] ) ];
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
                     float a = getTensor( tensor, j, yi_local );
@@ -118,7 +122,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 }
             }
             
-            float lowerbounds = i + 1 != mlpTrainArg.nLayer ? 0.0f : -3.40282e+38f;
+            float lowerbounds = i + 1 != arg.nLayer ? 0.0f : -3.40282e+38f;
             for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
             {
                 value[yi_local] = fmaxf( value[yi_local], lowerbounds );
@@ -133,9 +137,9 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
             {
                 setTensor( tensor, xi, yi_local, value[yi_local] );
                 int yi = yi_global_base + yi_local;
-                if( yi < mlpTrainArg.inputMat.m_row )
+                if( yi < arg.inputMat.m_row )
                 {
-                    intermediates[elem( xi, yi, mlpTrainArg.m_Is[i + 1] )] = value[yi_local];
+                    intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = value[yi_local];
                 }
             }
         }
@@ -147,9 +151,9 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
     for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
     {
         int yi = yi_global_base + yi_local;
-        if( xi < mlpTrainArg.inputRefMat.m_col && yi < mlpTrainArg.inputRefMat.m_row )
+        if( xi < arg.inputRefMat.m_col && yi < arg.inputRefMat.m_row )
         {
-            refs[yi_local] = intermediates[elem( xi, yi, mlpTrainArg.inputRefMat)];
+            refs[yi_local] = intermediates[elem( xi, yi, arg.inputRefMat)];
         }
         else
         {
@@ -162,7 +166,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
         float x = getTensor( tensor, xi, yi_local );
         float d = x - refs[yi_local];
         int yi = yi_global_base + yi_local;
-        if( mlpTrainArg.inputMat.m_row <= yi )
+        if( arg.inputMat.m_row <= yi )
         {
             d = 0.0f;
         }
@@ -172,10 +176,10 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
     __syncthreads();
 
     // backward
-    for( int i = mlpTrainArg.nLayer - 1 ; 0 <= i ; i-- )
+    for( int i = arg.nLayer - 1 ; 0 <= i ; i-- )
     {
-        int row = mlpTrainArg.m_Ws[i].m_row; // input
-        int col = mlpTrainArg.m_Ws[i].m_col; // output
+        int row = arg.m_Ws[i].m_row; // input
+        int col = arg.m_Ws[i].m_col; // output
 
         if( xi < col )
         {
@@ -186,12 +190,12 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 float v = getTensor( tensor, xi, yi_local );
 
                 // ReLU derivative
-                if( i != mlpTrainArg.nLayer - 1 )
+                if( i != arg.nLayer - 1 )
                 {
                     int yi = yi_global_base + yi_local;
-                    if( yi < mlpTrainArg.inputMat.m_row )
+                    if( yi < arg.inputMat.m_row )
                     {
-                        if( intermediates[elem( xi, yi, mlpTrainArg.m_Is[i+1] )] == 0.0f )
+                        if( intermediates[elem( xi, yi, arg.m_Is[i+1] )] == 0.0f )
                         {
                             v = 0.0f;
                         }
@@ -206,7 +210,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
             
             if( 0.0f != dB )
             {
-                atomicAdd( &dMatBuffer[ elem( xi, 0, mlpTrainArg.m_Bs[i] ) ], dB );
+                atomicAdd( &dMatBuffer[ elem( xi, 0, arg.m_Bs[i] ) ], dB );
             }
         }
         
@@ -222,14 +226,14 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
                     int yi = yi_global_base + yi_local;
-                    if( yi < mlpTrainArg.inputMat.m_row )
+                    if( yi < arg.inputMat.m_row )
                     {
-                        float X = intermediates[elem( yi_W, yi, mlpTrainArg.m_Is[i] /* input Xs */ )];
+                        float X = intermediates[elem( yi_W, yi, arg.m_Is[i] /* input Xs */ )];
                         float Y = getTensor( tensor, xi, yi_local );
                         dW = fma( X, Y, dW );
                     }
                 }
-                atomicAdd( &dMatBuffer[ elem( xi, yi_W, mlpTrainArg.m_Ws[i] ) ], dW );
+                atomicAdd( &dMatBuffer[ elem( xi, yi_W, arg.m_Ws[i] ) ], dW );
             }
         }
 
@@ -243,7 +247,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
         {
             for( int j = 0 ; j < col ; j++ ) 
             {
-                float b = matBuffer[ elem( j, xi, mlpTrainArg.m_Ws[i] ) ];
+                float b = matBuffer[ elem( j, xi, arg.m_Ws[i] ) ];
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
                     float a = getTensor( tensor, j, yi_local );
@@ -274,7 +278,7 @@ extern "C" __global__ void adamOptimize( float* matBuffer, float* dMatBuffer, Ad
     }
 }
 
-extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, float* gridFeature, MLPForwardArg arg ) 
+extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, MLPForwardArg arg ) 
 {
     __shared__ float tensor[64 * SHARED_TENSOR_ROW];
 
@@ -305,7 +309,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
     }
     __syncthreads();
 
-    if( arg.encoder == 1 ) // frequency
+    if( arg.encoder == EncoderType::Frequency )
     {
         Frequency frequency( arg.inputMat.m_col, xi, FREQ_N );
         
@@ -327,7 +331,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         }
         __syncthreads();
     }
-    if( arg.encoder == 2 ) // Multi Resolution Hash
+    else if( arg.encoder == EncoderType::MultiResolutionHash )
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
@@ -353,7 +357,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
                     evaluator.evaluate( &w, &h, res, input );
                     uint32_t index = h % GRID_T;
                     int address = baseLevel + GRID_T * fdim + index;
-                    float f = gridFeature[address];
+                    float f = matBuffer[arg.gridFeatureLocation + address];
                     feature += w * f;
                 }
                 setTensor( tensor, xi, yi_local, feature );

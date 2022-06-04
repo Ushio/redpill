@@ -209,39 +209,23 @@ namespace rpml
 				}
 			}
 		};
-		MLPg( const MLPConfig& config, std::string kernels ) : m_config(config)
+		MLPg( const MLPConfig& config, std::string kernels ) : m_config( config )
 		{
-			//bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
-			//std::vector<std::string> macros;
-			//if( hasEncoder )
-			//{
-			//	auto f = dynamic_cast<const FrequencyEncoder*>( mlp.m_layers[0].get() );
-			//	if( f )
-			//	{
-			//		m_frequency = f;
-			//	}
-
-			//	auto g = dynamic_cast<const MultiResolutionHashEncoder*>( mlp.m_layers[0].get() );
-			//	if( g )
-			//	{
-			//		m_grid = g;
-
-			//		int bytesPerTable = g->m_config.T * g->m_config.F * sizeof( float );
-			//		m_gridBuffer = std::unique_ptr<Buffer>( new Buffer( bytesPerTable * g->m_config.L ) );
-
-			//		macros.push_back( "-DGRID_INPUT_DIM=" + std::to_string( mlp.m_layers[0]->inputDimensions() ) );
-			//		macros.push_back( "-DGRID_L=" + std::to_string( g->m_config.L ) );
-			//		macros.push_back( "-DGRID_T=" + std::to_string( g->m_config.T ) );
-			//		macros.push_back( "-DGRID_F=" + std::to_string( g->m_config.F ) );
-			//		macros.push_back( "-DGRID_NMIN=(float)(" + std::to_string( g->m_config.Nmin ) + ")" );
-			//		macros.push_back( "-DGRID_B=(float)(" + std::to_string( g->m_config.b ) + ")" );
-			//	}
-			//}
 			std::vector<std::string> macros;
 
 			if( config.m_encoderType == EncoderType::Frequency )
 			{
 				macros.push_back( "-DFREQ_N=" + std::to_string( config.m_frequencyEncoderConfig.N ) );
+			}
+			else if( config.m_encoderType == EncoderType::MultiResolutionHash )
+			{
+				auto cfg = m_config.m_multiResolutionHashConfig;
+				macros.push_back( "-DGRID_INPUT_DIM=" + std::to_string( config.m_shape[0] ) );
+				macros.push_back( "-DGRID_L=" + std::to_string( cfg.L ) );
+				macros.push_back( "-DGRID_T=" + std::to_string( cfg.T ) );
+				macros.push_back( "-DGRID_F=" + std::to_string( cfg.F ) );
+				macros.push_back( "-DGRID_NMIN=(float)(" + std::to_string( cfg.Nmin ) + ")" );
+				macros.push_back( "-DGRID_B=(float)(" + std::to_string( cfg.b ) + ")" );
 			}
 
 			int location = 0;
@@ -249,9 +233,20 @@ namespace rpml
 			{
 				int input = config.m_shape[i];
 				int output = config.m_shape[i + 1];
-				if( i == 0 && config.m_encoderType == EncoderType::Frequency )
+				if( i == 0 )
 				{
-					input = frequencyOutputDim( input, config.m_frequencyEncoderConfig.N );
+					if( config.m_encoderType == EncoderType::Frequency )
+					{
+						input = frequencyOutputDim( input, config.m_frequencyEncoderConfig.N );
+					}
+					else if( config.m_encoderType ==EncoderType::MultiResolutionHash )
+					{
+						input = multiResolutionHashOutputDim( m_config.m_multiResolutionHashConfig.L, m_config.m_multiResolutionHashConfig.F );
+						m_gridFeatureLocation = location;
+						auto cfg = m_config.m_multiResolutionHashConfig;
+						int elementsPerTable = cfg.T * cfg.F;
+						location += elementsPerTable * cfg.L;
+					}
 				}
 
 				GPUMat w = allocateGPUMat( &location, input, output );
@@ -301,15 +296,25 @@ namespace rpml
 
 			int location = 0;
 			GPUMat inputGPU = allocateGPUMat( &location, input.row(), input.col() );
-			if( m_config.m_encoderType == EncoderType::None )
+			switch( m_config.m_encoderType )
 			{
+			case EncoderType::None:
 				m_Is.push_back( inputGPU );
-			}
-			else if( m_config.m_encoderType == EncoderType::Frequency )
+				break;
+			case EncoderType::Frequency: 
 			{
 				int output = frequencyOutputDim( input.col(), m_config.m_frequencyEncoderConfig.N );
 				GPUMat encoded = allocateGPUMat( &location, input.row(), output );
 				m_Is.push_back( encoded );
+				break;
+			}
+			case EncoderType::MultiResolutionHash:
+			{
+				int output = multiResolutionHashOutputDim( m_config.m_multiResolutionHashConfig.L, m_config.m_multiResolutionHashConfig.F );
+				GPUMat encoded = allocateGPUMat( &location, input.row(), output );
+				m_Is.push_back( encoded );
+				break;
+			}
 			}
 
 			for( int i = 0; i < m_Ws.size(); ++i )
@@ -354,11 +359,7 @@ namespace rpml
 				arg.m_Is[i] = m_Is[i];
 			}
 			arg.nLayer = m_Ws.size();
-			arg.encoder = 0;
-			if( m_config.m_encoderType == EncoderType::Frequency )
-			{
-				arg.encoder = 1;
-			}
+			arg.encoder = m_config.m_encoderType;
 
 			ShaderArgument trainArgs;
 			trainArgs.add( m_matBuffer->data() );
@@ -399,7 +400,25 @@ namespace rpml
 		void takeReference( const MLP& mlp )
 		{
 			bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
-			int location = 0;
+
+			auto grid = dynamic_cast<const MultiResolutionHashEncoder*>( mlp.m_layers[0].get() );
+			if( grid )
+			{
+				for( int level = 0; level < grid->m_config.L; ++level )
+				{
+					const Mat& feature = grid->m_features[level];
+
+					int baseLevel = grid->m_config.T * grid->m_config.F * sizeof( float ) * level;
+					for( int fi = 0; fi < grid->m_config.F; ++fi )
+					{
+						int bytesPerFeature = grid->m_config.T * sizeof( float );
+						oroMemcpyHtoD( 
+							( oroDeviceptr )( m_matBuffer->data() + m_gridFeatureLocation * sizeof( float ) + baseLevel + bytesPerFeature * fi ), 
+							(void*)&feature( fi, 0 ), bytesPerFeature );
+					}
+				}
+			}
+
 			std::vector<const AffineLayer*> affineLayers;
 			for( int i = ( hasEncoder ? 1 : 0 ); i < mlp.m_layers.size(); i += 2 )
 			{
@@ -415,21 +434,6 @@ namespace rpml
 		void foward( oroStream stream, const Mat& input, Mat* output )
 		{
 			synchronizeLearning();
-
-			//if( m_grid )
-			//{
-			//	for( int level = 0; level < m_grid->m_config.L; ++level )
-			//	{
-			//		const Mat& feature = m_grid->m_features[level];
-
-			//		int baseLevel = m_grid->m_config.T * m_grid->m_config.F * sizeof( float ) * level;
-			//		for( int fi = 0; fi < m_grid->m_config.F; ++fi )
-			//		{
-			//			int bytesPerFeature = m_grid->m_config.T * sizeof( float );
-			//			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_gridBuffer->data() + baseLevel + bytesPerFeature * fi ), (void*)&feature( fi, 0 ), bytesPerFeature, stream );
-			//		}
-			//	}
-			//}
 
 			int row = input.row();
 			int paddedRow = input.paddedRow();
@@ -467,22 +471,13 @@ namespace rpml
 				arg.m_Bs[i] = m_Bs[i];
 			}
 			arg.nLayer = m_Ws.size();
-
-			arg.encoder = 0;
-			if( m_config.m_encoderType == EncoderType::Frequency )
-			{
-				arg.encoder = 1;
-			}
-			//if( m_grid )
-			//{
-			//	encoding.mode = 2;
-			//}
+			arg.encoder = m_config.m_encoderType;
+			arg.gridFeatureLocation = m_gridFeatureLocation;
 
 			ShaderArgument args;
 			args.add( m_inputBuffer->data() );
 			args.add( m_outputBuffer->data() );
 			args.add( m_matBuffer->data() );
-			args.add( m_gridBuffer ? m_gridBuffer->data() : nullptr );
 			args.add( arg );
 
 			int gridDim = div_round_up( row, SHARED_TENSOR_ROW );
@@ -500,6 +495,7 @@ namespace rpml
 		std::unique_ptr<Buffer> m_matBuffer;
 		std::vector<GPUMat> m_Ws;
 		std::vector<GPUMat> m_Bs;
+		int m_gridFeatureLocation = 0;
 
 		// learning
 		std::unique_ptr<Buffer> m_inputRefBuffer;
@@ -509,10 +505,6 @@ namespace rpml
 		std::vector<GPUMat> m_Is;
 		std::queue<std::shared_ptr<LearningTask>> m_learningQueue;
 
-		//const FrequencyEncoder* m_frequency = 0;
-		//const MultiResolutionHashEncoder* m_grid = 0;
-
-		std::unique_ptr<Buffer> m_gridBuffer;
 		std::unique_ptr<Shader> m_forwardShader;
 
 		int m_iteration = 0;
