@@ -492,7 +492,6 @@ namespace rpml
 		int m_gridFeatureLocation = 0;
 
 		// learning
-		std::unique_ptr<Buffer> m_inputRefBuffer;
 		std::unique_ptr<Buffer> m_intermediateBuffer;
 		std::unique_ptr<Buffer> m_dmatBuffer;
 		std::unique_ptr<Buffer> m_adamBuffer;
@@ -722,7 +721,6 @@ namespace rpml
 		std::unique_ptr<Buffer> m_nerfSamplesBuffer;
 
 		// learning
-		std::unique_ptr<Buffer> m_inputRefBuffer;
 		std::unique_ptr<Buffer> m_intermediateBuffer;
 		std::unique_ptr<Buffer> m_dmatBuffer;
 		std::unique_ptr<Buffer> m_adamBuffer;

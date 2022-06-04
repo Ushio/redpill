@@ -404,6 +404,8 @@ int main()
 	}
 
 	pr::CleanUp();
+
+	oroCtxDestroy( ctx );
 }
 #endif
 

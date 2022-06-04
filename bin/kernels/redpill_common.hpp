@@ -1,12 +1,11 @@
 #pragma once
 
 #if defined( __HIPCC__ ) || defined( __CUDACC__ )
-#include <float.h>
-
 #define IS_HOST 0
 #define DEVICE __device__
 #define DEVICE_INLINE __device__ inline
 typedef unsigned int uint32_t;
+#define FLT_MAX 3.402823466e+38F // max value
 
 #define INTRIN_SINF( x ) __sinf( x )
 #define INTRIN_COSF( x ) __cosf( x )
@@ -268,6 +267,51 @@ namespace rpml
 	};
 #if IS_HOST == 0
 	DEVICE_INLINE
+	float3 operator*( float3 a, float3 b )
+	{
+		float3 r;
+		r.x = a.x * b.x;
+		r.y = a.y * b.y;
+		r.z = a.z * b.z;
+		return r;
+	}
+	DEVICE_INLINE
+	float3 operator*( float3 a, float b )
+	{
+		float3 r;
+		r.x = a.x * b;
+		r.y = a.y * b;
+		r.z = a.z * b;
+		return r;
+	}
+	DEVICE_INLINE
+	float3 operator-( float3 a, float3 b )
+	{
+		float3 r;
+		r.x = a.x - b.x;
+		r.y = a.y - b.y;
+		r.z = a.z - b.z;
+		return r;
+	}
+	DEVICE_INLINE
+	float3 operator+( float3 a, float3 b )
+	{
+		float3 r;
+		r.x = a.x + b.x;
+		r.y = a.y + b.y;
+		r.z = a.z + b.z;
+		return r;
+	}
+	DEVICE_INLINE
+	float3 operator/( float3 a, float3 b )
+	{
+		float3 r;
+		r.x = a.x / b.x;
+		r.y = a.y / b.y;
+		r.z = a.z / b.z;
+		return r;
+	}
+	DEVICE_INLINE
 	float3 fmaxf3( float3 a, float3 b )
 	{
 		float3 r;
@@ -318,7 +362,7 @@ namespace rpml
 	DEVICE_INLINE
 	float3 safe_inv_rd( float3 rd )
 	{
-		return clampf3( float3( 1.0f, 1.0f, 1.0f ) / rd, float3( -FLT_MAX, -FLT_MAX, -FLT_MAX ), float3( FLT_MAX, FLT_MAX, FLT_MAX ) );
+		return clampf3( make_float3( 1.0f, 1.0f, 1.0f ) / rd, make_float3( -FLT_MAX, -FLT_MAX, -FLT_MAX ), make_float3( FLT_MAX, FLT_MAX, FLT_MAX ) );
 	}
 #endif
 }
