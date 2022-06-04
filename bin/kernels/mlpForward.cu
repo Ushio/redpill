@@ -94,7 +94,43 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
     }
     else if( arg.encoder == EncoderType::MultiResolutionHash )
     {
+        int level = xi / GRID_F;
+        int fdim  = xi % GRID_F;
+        int baseLevel = GRID_T * GRID_F * level;
+        float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            float input[GRID_INPUT_DIM];
+            for( int x = 0 ; x < GRID_INPUT_DIM ; x++ )
+            {
+                input[x] = getTensor( tensor, x, yi_local );
+            }
+            __syncthreads();
 
+            if( level < GRID_L )
+            {
+                HashGridEvaluator evaluator( GRID_INPUT_DIM );
+                float feature = 0.0f;
+                while( evaluator.moveNext() )
+                {
+                    float w;
+                    uint32_t h;
+                    evaluator.evaluate( &w, &h, res, input );
+                    uint32_t index = h % GRID_T;
+                    int address = baseLevel + GRID_T * fdim + index;
+                    float f = matBuffer[arg.gridFeatureLocation + address];
+                    feature += w * f;
+                }
+                setTensor( tensor, xi, yi_local, feature );
+
+                int yi = yi_global_base + yi_local;
+                if( yi < arg.inputMat.m_row )
+                {
+                    intermediates[elem( xi, yi, arg.m_Is[0] )] = value[yi_local];
+                }
+            }
+        }
+        __syncthreads();
     }
 
     // Forward
@@ -267,6 +303,46 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
         }
         __syncthreads();
     }
+
+    // encode backward
+    if( arg.encoder == EncoderType::MultiResolutionHash )
+    {
+        int level = xi / GRID_F;
+        int fdim  = xi % GRID_F;
+        int baseLevel = GRID_T * GRID_F * level;
+        float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            int yi = yi_global_base + yi_local;
+            if( arg.inputMat.m_row <= yi )
+            {
+                break;
+            }
+
+            float input[GRID_INPUT_DIM];
+            for( int x = 0 ; x < GRID_INPUT_DIM ; x++ )
+            {
+                input[x] = intermediates[elem( x, yi, arg.inputMat)];
+            }
+
+            if( level < GRID_L )
+            {
+                float derivative = getTensor( tensor, xi, yi_local );
+
+                HashGridEvaluator evaluator( GRID_INPUT_DIM );
+                float feature = 0.0f;
+                while( evaluator.moveNext() )
+                {
+                    float w;
+                    uint32_t h;
+                    evaluator.evaluate( &w, &h, res, input );
+                    uint32_t index = h % GRID_T;
+                    int address = baseLevel + GRID_T * fdim + index;
+                    atomicAdd( &dMatBuffer[arg.gridFeatureLocation + address], w * derivative );
+                }
+            }
+        }
+    }
 }
 
 extern "C" __global__ void adamOptimize( float* matBuffer, float* dMatBuffer, Adam* adamBuffer, float alpha, float beta1t, float beta2t, int nAdam ) 
@@ -336,7 +412,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
         int baseLevel = GRID_T * GRID_F * level;
-        float res = floor( GRID_NMIN * __powf( GRID_B, level ) );
+        float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             float input[GRID_INPUT_DIM];

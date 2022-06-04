@@ -286,6 +286,18 @@ namespace rpml
 					matBuffer[elem( ix, iy, b )] = m.draw() * s;
 				}
 			}
+			if( config.m_encoderType == EncoderType::MultiResolutionHash )
+			{
+				auto cfg = m_config.m_multiResolutionHashConfig;
+				int elementsPerTable = cfg.T * cfg.F;
+				int numberOfElements = elementsPerTable * cfg.L;
+
+				for( int i = 0; i < numberOfElements ; i++)
+				{
+					matBuffer[m_gridFeatureLocation + i] = -1e-4f + 2.0f * 1e-4f * rng.draw();
+				}
+			}
+
 			oroMemcpyHtoD( (oroDeviceptr)m_matBuffer->data(), matBuffer.data(), matBuffer.size() * sizeof( float ) );
 
 			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release ) );
@@ -360,6 +372,7 @@ namespace rpml
 			}
 			arg.nLayer = m_Ws.size();
 			arg.encoder = m_config.m_encoderType;
+			arg.gridFeatureLocation = m_gridFeatureLocation;
 
 			ShaderArgument trainArgs;
 			trainArgs.add( m_matBuffer->data() );

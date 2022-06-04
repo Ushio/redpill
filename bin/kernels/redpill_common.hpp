@@ -69,7 +69,7 @@ namespace rpml
 		GPUMat m_Is[16];
 		int nLayer;
 		EncoderType encoder;
-		int padd1;
+		int gridFeatureLocation;
 		int padd2;
 	};
 
