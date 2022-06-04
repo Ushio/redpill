@@ -357,7 +357,7 @@ extern "C" __global__ void adamOptimize( float* matBuffer, float* dMatBuffer, Ad
     }
 }
 
-extern "C" __global__ void forward( float* inputs, float* output, float* matBuffer, MLPForwardArg arg ) 
+extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPForwardArg arg ) 
 {
     __shared__ float tensor[64 * SHARED_TENSOR_ROW];
 
@@ -374,7 +374,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
             int yi = yi_global_base + yi_local;
             if( yi < arg.inputMat.m_row )
             {
-                vs[yi_local] = inputs[elem( xi, yi, arg.inputMat)];
+                vs[yi_local] = intermediates[elem( xi, yi, arg.inputMat)];
             }
             else
             {
@@ -498,7 +498,7 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
             int yi = yi_global_base + yi_local;
             if( yi < arg.outputMat.m_row )
             {
-                output[ elem( xi, yi, arg.outputMat )] = value[yi_local];
+                intermediates[ elem( xi, yi, arg.outputMat )] = value[yi_local];
             }
         }
     }

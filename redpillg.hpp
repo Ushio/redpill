@@ -448,32 +448,16 @@ namespace rpml
 		{
 			synchronizeLearning();
 
-			int row = input.row();
-			int paddedRow = input.paddedRow();
+			int outputDim = m_Ws[m_Ws.size() - 1].m_col;
+			int location = 0;
+			GPUMat inputGPU = allocateGPUMat( &location, input.row(), input.col() );
+			GPUMat outputGPU = allocateGPUMat( &location, input.row(), outputDim );
 
-			GPUMat inputGPU;
-			inputGPU.m_location = 0;
-			inputGPU.m_row = row;
-			inputGPU.m_paddedRow = paddedRow;
-			inputGPU.m_col = input.col();
-
-			if( !m_inputBuffer || m_inputBuffer->bytes() < input.bytes() )
+			if( !m_intermediateBuffer || m_intermediateBuffer->bytes() < location * sizeof( float ) )
 			{
-				m_inputBuffer = std::unique_ptr<Buffer>( new Buffer( input.bytes() ) );
+				m_intermediateBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			}
-
-			oroMemcpyHtoDAsync( (oroDeviceptr)m_inputBuffer->data(), (void*)input.data(), input.bytes(), stream );
-
-			GPUMat outputGPU;
-			outputGPU.m_location = 0;
-			outputGPU.m_row = row;
-			outputGPU.m_paddedRow = paddedRow;
-			outputGPU.m_col = m_Ws[m_Ws.size() - 1].m_col;
-			int64_t outputGPUBytes = (int64_t)outputGPU.m_paddedRow * outputGPU.m_col * sizeof( float );
-			if( !m_outputBuffer || m_outputBuffer->bytes() < outputGPUBytes )
-			{
-				m_outputBuffer = std::unique_ptr<Buffer>( new Buffer( outputGPUBytes ) );
-			}
+			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputGPU.m_location * sizeof( float ) ), (void*)input.data(), input.bytes(), stream );
 
 			MLPForwardArg arg;
 			arg.inputMat = inputGPU;
@@ -488,23 +472,20 @@ namespace rpml
 			arg.gridFeatureLocation = m_gridFeatureLocation;
 
 			ShaderArgument args;
-			args.add( m_inputBuffer->data() );
-			args.add( m_outputBuffer->data() );
+			args.add( m_intermediateBuffer->data() );
 			args.add( m_matBuffer->data() );
 			args.add( arg );
 
-			int gridDim = div_round_up( row, SHARED_TENSOR_ROW );
+			int gridDim = div_round_up( input.row(), SHARED_TENSOR_ROW );
 			m_forwardShader->launch( "forward", args, gridDim, 1, 1, 1, 64, 1, stream );
 
 			output->setShape( outputGPU.m_row, outputGPU.m_col );
 
-			oroMemcpyDtoHAsync( output->data(), (oroDeviceptr)m_outputBuffer->data(), output->bytes(), stream );
+			oroMemcpyDtoHAsync( output->data(), (oroDeviceptr)( m_intermediateBuffer->data() + outputGPU.m_location * sizeof(float) ), output->bytes(), stream );
 
 			oroStreamSynchronize( stream );
 		}
 
-		std::unique_ptr<Buffer> m_inputBuffer;
-		std::unique_ptr<Buffer> m_outputBuffer;
 		std::unique_ptr<Buffer> m_matBuffer;
 		std::vector<GPUMat> m_Ws;
 		std::vector<GPUMat> m_Bs;
