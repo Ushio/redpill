@@ -312,11 +312,12 @@ int main()
 				refs( 2, i ) = y.z / 255.0f;
 			}
 			// printf( "sw_prepare %f\n", sw_prepare.elapsed() );
-			loss = mlp.train( inputs, refs );
-			// mlpg.train( stream, inputs, refs );
+			// loss = mlp.train( inputs, refs );
+			mlpg.train( stream, inputs, refs );
 
 			iterations++;
 		}
+		oroStreamSynchronize( stream );
 		float sTrained = sw_train.elapsed();
 
 		
@@ -341,7 +342,7 @@ int main()
 				inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
 			}
 		}
-		mlpg.takeReference( mlp );
+		// mlpg.takeReference( mlp );
 		mlpg.foward( stream, inUVs, &outColors );
 
 		for( int yi = 0; yi < estimatorHeight; yi++ )
