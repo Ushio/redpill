@@ -154,7 +154,13 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
     for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
     {
         float x = getTensor( tensor, xi, yi_local );
-        setTensor( tensor, xi, yi_local, x - refs[yi_local] );
+        float d = x - refs[yi_local];
+        int yi = yi_global_base + yi_local;
+        if( mlpTrainArg.inputMat.m_row <= yi )
+        {
+            d = 0.0f;
+        }
+        setTensor( tensor, xi, yi_local, d );
     }
 
     __syncthreads();
