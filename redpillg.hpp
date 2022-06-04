@@ -523,4 +523,228 @@ namespace rpml
 		int m_iteration = 0;
 		MLPConfig m_config;
 	};
+
+	class NeRFg
+	{
+	public:
+		NeRFg( std::string kernels )
+		{
+			std::vector<std::string> macros;
+
+			{
+				m_hashConfig.L = 16;
+				m_hashConfig.T = std::pow( 2, 19 );
+				m_hashConfig.F = 2;
+				m_hashConfig.Nmin = 16;
+				m_hashConfig.b = 1.38191f;
+				macros.push_back( "-DGRID_INPUT_DIM=" + std::to_string( 3 ) );
+				macros.push_back( "-DGRID_L=" + std::to_string( m_hashConfig.L ) );
+				macros.push_back( "-DGRID_T=" + std::to_string( m_hashConfig.T ) );
+				macros.push_back( "-DGRID_F=" + std::to_string( m_hashConfig.F ) );
+				macros.push_back( "-DGRID_NMIN=(float)(" + std::to_string( m_hashConfig.Nmin ) + ")" );
+				macros.push_back( "-DGRID_B=(float)(" + std::to_string( m_hashConfig.b ) + ")" );
+			}
+
+			int location = 0;
+
+			// encording
+			int encodeOutputDim = multiResolutionHashOutputDim( m_hashConfig.L, m_hashConfig.F );
+			m_gridFeatureLocation = location;
+			int elementsPerTable = m_hashConfig.T * m_hashConfig.F;
+			location += elementsPerTable * m_hashConfig.L;
+
+			// Density Network ( 32 -> 64 -> 16 )
+			m_Ws.push_back( allocateGPUMat( &location, encodeOutputDim, 64 ) );
+			m_Bs.push_back( allocateGPUMat( &location, 1, 64 ) );
+			m_Ws.push_back( allocateGPUMat( &location, 64, 16 ) );
+			m_Bs.push_back( allocateGPUMat( &location, 1,  16 ) );
+
+			// Color Network ( 32 -> 64 -> 64 -> 3 )
+			m_Ws.push_back( allocateGPUMat( &location, 32, 64 ) );
+			m_Bs.push_back( allocateGPUMat( &location, 1, 64 ) );
+			m_Ws.push_back( allocateGPUMat( &location, 64, 64 ) );
+			m_Bs.push_back( allocateGPUMat( &location, 1, 64 ) );
+			m_Ws.push_back( allocateGPUMat( &location, 64, 3 ) );
+			m_Bs.push_back( allocateGPUMat( &location, 1, 3 ) );
+
+			m_matBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
+			m_dmatBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
+			m_adamBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( Adam ) ) );
+			oroMemsetD32( (oroDeviceptr)m_dmatBuffer->data(), 0, m_dmatBuffer->bytes() / sizeof( float ) );
+			oroMemsetD32( (oroDeviceptr)m_adamBuffer->data(), 0, m_adamBuffer->bytes() / sizeof( float ) );
+
+			// initialization
+			StandardRng rng;
+			std::vector<float> matBuffer( location );
+			for( int i = 0; i < m_Ws.size(); i++ )
+			{
+				int input = m_Ws[i].m_row;
+
+				float s = std::sqrt( 2.0f / (float)input );
+				BoxMular m( &rng );
+
+				GPUMat w = m_Ws[i];
+				GPUMat b = m_Bs[i];
+
+				for( int ix = 0; ix < w.m_col; ix++ )
+				for( int iy = 0; iy < w.m_row; iy++ )
+				{
+					matBuffer[elem( ix, iy, w )] = m.draw() * s;
+				}
+
+				for( int ix = 0; ix < b.m_col; ix++ )
+				for( int iy = 0; iy < b.m_row; iy++ )
+				{
+					matBuffer[elem( ix, iy, b )] = m.draw() * s;
+				}
+			}
+			{
+				auto cfg = m_hashConfig;
+				int elementsPerTable = cfg.T * cfg.F;
+				int numberOfElements = elementsPerTable * cfg.L;
+
+				for( int i = 0; i < numberOfElements; i++ )
+				{
+					matBuffer[m_gridFeatureLocation + i] = -1e-4f + 2.0f * 1e-4f * rng.draw();
+				}
+			}
+
+			oroMemcpyHtoD( (oroDeviceptr)m_matBuffer->data(), matBuffer.data(), matBuffer.size() * sizeof( float ) );
+
+			m_nerfSamplesBuffer = std::unique_ptr<Buffer>( new Buffer( sizeof( GPUMat ) ) );
+
+			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release ) );
+		}
+		void takeReference( const NeRF& nerf )
+		{
+			auto grid = dynamic_cast<const MultiResolutionHashEncoder*>( nerf.m_densityLayers[0].get() );
+			for( int level = 0; level < grid->m_config.L; ++level )
+			{
+				const Mat& feature = grid->m_features[level];
+
+				int baseLevel = grid->m_config.T * grid->m_config.F * sizeof( float ) * level;
+				for( int fi = 0; fi < grid->m_config.F; ++fi )
+				{
+					int bytesPerFeature = grid->m_config.T * sizeof( float );
+					oroMemcpyHtoD(
+						( oroDeviceptr )( m_matBuffer->data() + m_gridFeatureLocation * sizeof( float ) + baseLevel + bytesPerFeature * fi ),
+						(void*)&feature( fi, 0 ), bytesPerFeature );
+				}
+			}
+
+			{
+				std::vector<const AffineLayer*> affineLayers;
+				for( int i = 1; i < nerf.m_densityLayers.size(); i += 2 )
+				{
+					auto affineLayer = dynamic_cast<const AffineLayer*>( nerf.m_densityLayers[i].get() );
+					affineLayers.push_back( affineLayer );
+				}
+				PR_ASSERT( affineLayers.size() == NERF_DENSITY_LAYER_END - NERF_DENSITY_LAYER_BEG );
+				for( int i = 0; i < affineLayers.size(); ++i )
+				{
+					oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Ws[i].m_location * sizeof( float ) ), (void*)affineLayers[i]->m_W.data(), affineLayers[i]->m_W.bytes() );
+					oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[i].m_location * sizeof( float ) ), (void*)affineLayers[i]->m_b.data(), affineLayers[i]->m_b.bytes() );
+				}
+			}
+			{
+				std::vector<const AffineLayer*> affineLayers;
+				for( int i = 0; i < nerf.m_colorLayers.size(); i += 2 )
+				{
+					auto affineLayer = dynamic_cast<const AffineLayer*>( nerf.m_colorLayers[i].get() );
+					affineLayers.push_back( affineLayer );
+				}
+				PR_ASSERT( affineLayers.size() == NERF_COLOR_LAYER_END - NERF_COLOR_LAYER_BEG );
+				for( int i = 0; i < affineLayers.size(); ++i )
+				{
+					oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Ws[NERF_COLOR_LAYER_BEG + i].m_location * sizeof( float ) ), (void*)affineLayers[i]->m_W.data(), affineLayers[i]->m_W.bytes() );
+					oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[NERF_COLOR_LAYER_BEG + i].m_location * sizeof( float ) ), (void*)affineLayers[i]->m_b.data(), affineLayers[i]->m_b.bytes() );
+				}
+			}
+		}
+		//float train( const NeRFInput* inputs, const NeRFOutput* outputs, int nElement )
+		//{
+		//	
+		//}
+		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement )
+		{
+			if( !m_nerfInputBuffer || m_nerfInputBuffer->bytes() < nElement * sizeof( NeRFInput ) )
+			{
+				m_nerfInputBuffer = std::unique_ptr<Buffer>( new Buffer( nElement * sizeof( NeRFInput ) ) );
+			}
+			oroMemcpyHtoD( (oroDeviceptr)m_nerfInputBuffer->data(), (void*)inputs, nElement * sizeof( NeRFInput ) );
+			if( !m_rayBuffer || m_rayBuffer->bytes() < nElement * sizeof( NeRFRay ) )
+			{
+				m_rayBuffer = std::unique_ptr<Buffer>( new Buffer( nElement * sizeof( NeRFRay ) ) );
+			}
+			oroMemsetD8( (oroDeviceptr)m_rayBuffer->data(), 0, m_rayBuffer->bytes() );
+
+			int location = 0;
+			GPUMat inputGPU  = allocateGPUMat( &location, nElement * MLP_STEP, 3 );
+			GPUMat outputGPU = allocateGPUMat( &location, nElement * MLP_STEP, 4 ); // RGB + density
+
+			if( !m_intermediateBuffer || m_intermediateBuffer->bytes() < location * sizeof( float ) )
+			{
+				m_intermediateBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
+			}
+
+			inputGPU.m_row = 0;
+			oroMemcpyHtoD( (oroDeviceptr)m_nerfSamplesBuffer->data(), &inputGPU, sizeof( GPUMat ) );
+			
+			{
+				ShaderArgument args;
+				args.add( m_nerfInputBuffer->data() );
+				args.add( m_rayBuffer->data() );
+				args.add( m_intermediateBuffer->data() );
+				args.add( m_nerfSamplesBuffer->data() );
+				args.add( nElement );
+
+				int gridDim = div_round_up( nElement, 64 );
+				m_forwardShader->launch( "nerfRays", args, gridDim, 1, 1, 1, 64, 1, nullptr );
+			}
+
+			oroMemcpyDtoH( &inputGPU, ( oroDeviceptr ) m_nerfSamplesBuffer->data(), sizeof( GPUMat ) );
+
+			// printf( "xs %d\n", inputGPU.m_row );
+
+			NeRFForwardArg arg;
+			arg.inputMat = inputGPU;
+			arg.outputMat = outputGPU;
+			for( int i = 0; i < m_Ws.size(); ++i )
+			{
+				arg.m_Ws[i] = m_Ws[i];
+				arg.m_Bs[i] = m_Bs[i];
+			}
+			arg.gridFeatureLocation = m_gridFeatureLocation;
+
+			//ShaderArgument args;
+			//args.add( m_inputBuffer->data() );
+			//args.add( m_outputBuffer->data() );
+			//args.add( m_matBuffer->data() );
+			//args.add( arg );
+
+			//int gridDim = div_round_up( row, SHARED_TENSOR_ROW );
+			//m_forwardShader->launch( "forward", args, gridDim, 1, 1, 1, 64, 1, stream );
+
+		}
+		MultiResolutionHashEncoder::Config m_hashConfig;
+		std::unique_ptr<Shader> m_forwardShader;
+
+		//std::unique_ptr<Buffer> m_inputBuffer;
+		//std::unique_ptr<Buffer> m_outputBuffer;
+		std::unique_ptr<Buffer> m_matBuffer;
+		std::vector<GPUMat> m_Ws;
+		std::vector<GPUMat> m_Bs;
+		int m_gridFeatureLocation = 0;
+
+		std::unique_ptr<Buffer> m_nerfInputBuffer;
+		std::unique_ptr<Buffer> m_rayBuffer;
+		std::unique_ptr<Buffer> m_nerfSamplesBuffer;
+
+		// learning
+		std::unique_ptr<Buffer> m_inputRefBuffer;
+		std::unique_ptr<Buffer> m_intermediateBuffer;
+		std::unique_ptr<Buffer> m_dmatBuffer;
+		std::unique_ptr<Buffer> m_adamBuffer;
+		std::vector<GPUMat> m_Is;
+	};
 }

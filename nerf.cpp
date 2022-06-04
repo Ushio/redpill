@@ -5,6 +5,7 @@
 
 #define RPML_DISABLE_ASSERT
 #include "redpill.hpp"
+#include "redpillg.hpp"
 using namespace rpml;
 
 #if defined( DrawText )
@@ -69,8 +70,29 @@ int main()
 
 	SetDataDir( ExecutableDir() );
 
-	NeRF nerf;
+	if( oroInitialize( ( oroApi )( ORO_API_HIP | ORO_API_CUDA ), 0 ) )
+	{
+		printf( "failed to init..\n" );
+		return 0;
+	}
 
+	oroError err;
+	err = oroInit( 0 );
+	oroDevice device;
+	err = oroDeviceGet( &device, 0 );
+	oroCtx ctx;
+	err = oroCtxCreate( &ctx, 0, device );
+	oroCtxSetCurrent( ctx );
+
+	oroStream stream = 0;
+	oroStreamCreate( &stream );
+
+	oroDeviceProp props;
+	oroGetDeviceProperties( &props, device );
+	printf( "GPU: %s\n", props.name );
+
+	NeRF nerf;
+	NeRFg nerfg( pr::GetDataPath( "kernels" ) );
 	std::vector<NerfCamera> cameras;
 
 	for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )
@@ -83,8 +105,8 @@ int main()
 		float fovy = camera_angle_x.get<float>();
 
 		nlohmann::json frames = j["frames"];
-		for( int i = 0; i < frames.size(); i++ )
-		// for( int i = 0; i < 10; i++ )
+		// for( int i = 0; i < frames.size(); i++ )
+		for( int i = 0; i < 3; i++ )
 		{
 			nlohmann::json camera = frames[i];
 			glm::mat4 m = loadMatrix( camera["transform_matrix"] );
@@ -295,6 +317,9 @@ int main()
 
 		nerf_out.resize( nerf_in.size() );
 		nerf.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
+		nerfg.takeReference( nerf );
+		nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
+		//nerfg.
 
 		int it = 0;
 		for( int y = 0; y < image.height(); ++y )

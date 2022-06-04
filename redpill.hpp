@@ -1515,20 +1515,7 @@ namespace rpml
 		std::mutex m_localMutex;
 	};
 
-	struct NeRFInput
-	{
-		float ro[3];
-		float rd[3];
-	};
-	struct NeRFOutput
-	{
-		float color[3];
-	};
-	struct NeRFMarching
-	{
-		int beg;
-		int end;
-	};
+
 	static const float Teps = 0.0001f;
 
 	static const int OC_BASE_SIZE = 128;
@@ -1573,7 +1560,6 @@ namespace rpml
 			MLP_DENSITY_OUT = 16,
 			MLP_WIDTH = 64,
 			//MLP_STEP = 64,
-			MLP_STEP = 1024,
 		};
 		NeRF( ) : m_pool( std::thread::hardware_concurrency() )
 		{
@@ -1730,12 +1716,12 @@ namespace rpml
 		{
 			// unsigned int fp_control_state = _controlfp( _EM_INEXACT, _MCW_EM );
 
-			static int oI = 0;
-			if( ++oI % 16 == 0 )
-			{
-				updateOccupancyGrid();
-				m_hasOc = true;
-			}
+			//static int oI = 0;
+			//if( ++oI % 16 == 0 )
+			//{
+			//	updateOccupancyGrid();
+			//	m_hasOc = true;
+			//}
 
 			float loss = 0.0f;
 

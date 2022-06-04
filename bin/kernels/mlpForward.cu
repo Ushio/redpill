@@ -503,3 +503,71 @@ extern "C" __global__ void forward( float* inputs, float* output, float* matBuff
         }
     }
 }
+
+extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* intermediates, GPUMat* nerfSamples, int nElement ) 
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if( nElement <= x )
+    {
+        return;
+    }
+
+    float3 ro = float3( inputs[x].ro[0], inputs[x].ro[1], inputs[x].ro[2] );
+    float3 rd = float3( inputs[x].rd[0], inputs[x].rd[1], inputs[x].rd[2] );
+    float3 one_over_rd = safe_inv_rd( rd );
+	float2 h = slabs( float3( 0.0f, 0.0f, 0.0f ), float3( 1.0f, 1.0f, 1.0f ), ro, rd );
+
+    GPUMat outputMat = *nerfSamples;
+
+	if( h.x /* min */ < h.y /* max */ )
+	{
+        int nSteps = 0;
+        float dt = sqrt( 3.0f ) / MLP_STEP;
+		
+        for( int i = 0 ; i < 1024 ; ++i )
+        {
+            float3 p = ro + rd * ( h.x + dt * i );
+            nSteps++;
+            
+            const float eps = 0.000001f;
+            if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
+            {
+                break;
+            }
+        }
+
+        int eval_beg = atomicAdd( &nerfSamples->m_row, nSteps );
+        int eval_end = eval_beg + nSteps;
+        rays[x].eval_beg = eval_beg;
+        rays[x].eval_end = eval_end;
+
+        for( int i = 0 ; i < 1024 ; ++i )
+        {
+            float3 p = ro + rd * ( h.x + dt * i );
+            
+            const float eps = 0.000001f;
+            if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
+            {
+                break;
+            }
+
+            intermediates[elem( 0, eval_beg + i, outputMat )] = p.x;
+            intermediates[elem( 1, eval_beg + i, outputMat )] = p.y;
+            intermediates[elem( 2, eval_beg + i, outputMat )] = p.z;
+        }
+    }
+    else
+    {
+        rays[x].eval_beg = 0;
+        rays[x].eval_end = 0;
+    }
+}
+
+extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, NeRFForwardArg arg ) 
+{
+    __shared__ float tensor[64 * SHARED_TENSOR_ROW];
+
+    int yi_global_base = blockIdx.x * SHARED_TENSOR_ROW;
+    int xi = threadIdx.y;
+
+}

@@ -1,6 +1,8 @@
 #pragma once
 
 #if defined( __HIPCC__ ) || defined( __CUDACC__ )
+#include <float.h>
+
 #define IS_HOST 0
 #define DEVICE __device__
 #define DEVICE_INLINE __device__ inline
@@ -13,7 +15,8 @@ typedef unsigned int uint32_t;
 #define IS_HOST 1
 #define DEVICE
 #define DEVICE_INLINE inline
-#include <cstdint>
+#include <stdint.h>
+#include <math.h>
 
 #define INTRIN_SINF( x ) std::sinf( x )
 #define INTRIN_COSF( x ) std::cosf( x )
@@ -226,4 +229,96 @@ namespace rpml
 	{
 		return L * F;
 	}
+
+	const int NERF_DENSITY_LAYER_BEG = 0;
+	const int NERF_DENSITY_LAYER_END = 2;
+	const int NERF_COLOR_LAYER_BEG = 2;
+	const int NERF_COLOR_LAYER_END = 5;
+	const int MLP_STEP = 1024;
+	struct NeRFInput
+	{
+		float ro[3]; float pad0;
+		float rd[3]; float pad1;
+	};
+	struct NeRFOutput
+	{
+		float color[3];
+		float pad;
+	};
+	struct NeRFMarching
+	{
+		int beg;
+		int end;
+	};
+	struct NeRFRay
+	{
+		int eval_beg;
+		int eval_end;
+	};
+    struct NeRFForwardArg
+	{
+		GPUMat inputMat;
+		GPUMat outputMat;
+		GPUMat m_Ws[16];
+		GPUMat m_Bs[16];
+		int gridFeatureLocation;
+		int padd0;
+		int padd1;
+		int padd2;
+	};
+#if IS_HOST == 0
+	DEVICE_INLINE
+	float3 fmaxf3( float3 a, float3 b )
+	{
+		float3 r;
+		r.x = fmax( a.x, b.x );
+		r.y = fmax( a.y, b.y );
+		r.z = fmax( a.z, b.z );
+		return r;
+	}
+	DEVICE_INLINE
+	float3 fminf3( float3 a, float3 b )
+	{
+		float3 r;
+		r.x = fmin( a.x, b.x );
+		r.y = fmin( a.y, b.y );
+		r.z = fmin( a.z, b.z );
+		return r;
+	}
+	DEVICE_INLINE
+	float3 clampf3( float3 x, float3 a, float3 b )
+	{
+		return fmaxf3(a, fminf3(b, x));
+	}
+	DEVICE_INLINE
+	float compMin( float3 v )
+	{
+		return fmin( fmin( v.x, v.y ), v.z );
+	}
+	DEVICE_INLINE
+	float compMax( float3 v )
+	{
+		return fmax( fmax( v.x, v.y ), v.z );
+	}
+	DEVICE_INLINE
+	float2 slabs( float3 p0, float3 p1, float3 ro, float3 one_over_rd )
+	{
+		float3 t0 = ( p0 - ro ) * one_over_rd;
+		float3 t1 = ( p1 - ro ) * one_over_rd;
+
+		float3 tmin = fminf3( t0, t1 );
+		float3 tmax = fmaxf3( t0, t1 );
+		float region_min = compMax( tmin );
+		float region_max = compMin( tmax );
+
+		region_min = fmax( region_min, 0.0f );
+
+		return make_float2( region_min, region_max );
+	}
+	DEVICE_INLINE
+	float3 safe_inv_rd( float3 rd )
+	{
+		return clampf3( float3( 1.0f, 1.0f, 1.0f ) / rd, float3( -FLT_MAX, -FLT_MAX, -FLT_MAX ), float3( FLT_MAX, FLT_MAX, FLT_MAX ) );
+	}
+#endif
 }
