@@ -350,7 +350,11 @@ extern "C" __global__ void adamOptimize( float* matBuffer, float* dMatBuffer, Ad
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if( x < nAdam )
     {
-        matBuffer[x] = adamBuffer[x].optimize( matBuffer[x], dMatBuffer[x], alpha, beta1t, beta2t );
+        if( dMatBuffer[x] != 0.0f )
+        {
+            matBuffer[x] = adamBuffer[x].optimize( matBuffer[x], dMatBuffer[x], alpha, beta1t, beta2t );
+            dMatBuffer[x] = 0.0f;
+        }
     }
 }
 
