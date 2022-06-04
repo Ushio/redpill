@@ -35,6 +35,8 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
 
     float value[SHARED_TENSOR_ROW];
     
+    // Load Input
+
     if( xi < mlpTrainArg.inputMat.m_col )
     {
         float vs[SHARED_TENSOR_ROW];
@@ -56,6 +58,8 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
         }
     }
     __syncthreads();
+
+    // Encording
 
     if( mlpTrainArg.encoder == 0 )
     {
@@ -88,6 +92,8 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
         }
         __syncthreads();
     }
+
+    // Forward
 
     for( int i = 0 ; i < mlpTrainArg.nLayer ; i++ )
     {
@@ -171,9 +177,10 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
         int row = mlpTrainArg.m_Ws[i].m_row; // input
         int col = mlpTrainArg.m_Ws[i].m_col; // output
 
-        float dB = 0.0f;
         if( xi < col )
         {
+            float dB = 0.0f;
+
             for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
             {
                 float v = getTensor( tensor, xi, yi_local );
@@ -196,16 +203,17 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
 
                 setTensor( tensor, xi, yi_local, v );
             }
+            
+            if( 0.0f != dB )
+            {
+                atomicAdd( &dMatBuffer[ elem( xi, 0, mlpTrainArg.m_Bs[i] ) ], dB );
+            }
         }
         
         __syncthreads();
 
         if( xi < col )
         {    
-            if( 0.0f != dB )
-            {
-                atomicAdd( &dMatBuffer[ elem( xi, 0, mlpTrainArg.m_Bs[i] ) ], dB );
-            }
 
             // Weight derivative
             for( int yi_W = 0 ; yi_W < row ; yi_W++ )
@@ -214,13 +222,12 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
                     int yi = yi_global_base + yi_local;
-                    float X = 0.0f;
                     if( yi < mlpTrainArg.inputMat.m_row )
                     {
-                        X = intermediates[elem( yi_W, yi, mlpTrainArg.m_Is[i] /* input Xs */ )];
+                        float X = intermediates[elem( yi_W, yi, mlpTrainArg.m_Is[i] /* input Xs */ )];
+                        float Y = getTensor( tensor, xi, yi_local );
+                        dW = fma( X, Y, dW );
                     }
-                    float Y = getTensor( tensor, xi, yi_local );
-                    dW = fma( X, Y, dW );
                 }
                 atomicAdd( &dMatBuffer[ elem( xi, yi_W, mlpTrainArg.m_Ws[i] ) ], dW );
             }
