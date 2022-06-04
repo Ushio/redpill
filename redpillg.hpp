@@ -259,7 +259,8 @@ namespace rpml
 			m_matBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			m_dmatBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			m_adamBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( Adam ) ) );
-			oroMemsetD8( (oroDeviceptr)m_adamBuffer->data(), 0, m_adamBuffer->bytes() );
+			oroMemsetD32( (oroDeviceptr)m_dmatBuffer->data(), 0, m_dmatBuffer->bytes() / sizeof(float) );
+			oroMemsetD32( (oroDeviceptr)m_adamBuffer->data(), 0, m_adamBuffer->bytes() / sizeof(float) );
 
 			// initialization
 			StandardRng rng;
@@ -292,7 +293,7 @@ namespace rpml
 				int elementsPerTable = cfg.T * cfg.F;
 				int numberOfElements = elementsPerTable * cfg.L;
 
-				for( int i = 0; i < numberOfElements ; i++)
+				for( int i = 0; i < numberOfElements ; i++ )
 				{
 					matBuffer[m_gridFeatureLocation + i] = -1e-4f + 2.0f * 1e-4f * rng.draw();
 				}
@@ -356,7 +357,6 @@ namespace rpml
 			task->refs = refs;
 			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputGPU.m_location * sizeof( float ) ), (void*)task->input.data(), task->input.bytes(), stream );
 			oroMemcpyHtoDAsync( ( oroDeviceptr )( m_intermediateBuffer->data() + inputRefGPU.m_location * sizeof( float ) ), (void*)task->refs.data(), task->refs.bytes(), stream );			
-			oroMemsetD8Async( (oroDeviceptr)m_dmatBuffer->data(), 0, m_dmatBuffer->bytes(), stream );
 
 			MLPTrainArg arg;
 			arg.inputMat = inputGPU;

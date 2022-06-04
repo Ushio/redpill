@@ -330,7 +330,6 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 float derivative = getTensor( tensor, xi, yi_local );
 
                 HashGridEvaluator evaluator( GRID_INPUT_DIM );
-                float feature = 0.0f;
                 while( evaluator.moveNext() )
                 {
                     float w;
