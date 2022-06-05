@@ -523,17 +523,15 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 	{
         int nSteps = 0;
         float dt = sqrt( 3.0f ) / MLP_STEP;
-		
         for( int i = 0 ; i < 1024 ; ++i )
         {
             float3 p = ro + rd * ( h.x + dt * i );
-            nSteps++;
-            
             const float eps = 0.00001f;
             if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
             {
                 break;
             }
+            nSteps++;
         }
 
         int eval_beg = atomicAdd( &nerfSamples->m_row, nSteps );
@@ -542,15 +540,13 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
         rays[x].eval_end = eval_end;
         // printf( "d %d %f %f %f\n", x, rd.x, rd.y, rd.z );
 
-        for( int i = 0 ; i < 1024 ; ++i )
+        for( int i = 0 ; i < nSteps ; ++i )
         {
             float3 p = ro + rd * ( h.x + dt * i );
-            
-            const float eps = 0.000001f;
-            if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
-            {
-                break;
-            }
+
+            p.x = fclamp( p.x, 0.0f, 1.0f );
+            p.y = fclamp( p.y, 0.0f, 1.0f );
+            p.z = fclamp( p.z, 0.0f, 1.0f );
 
             intermediates[elem( 0, eval_beg + i, outputMat )] = p.x;
             intermediates[elem( 1, eval_beg + i, outputMat )] = p.y;

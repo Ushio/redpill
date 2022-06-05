@@ -339,6 +339,11 @@ namespace rpml
 		return fmaxf3(a, fminf3(b, x));
 	}
 	DEVICE_INLINE
+	float fclamp( float x, float a, float b )
+	{
+		return fmin( fmax( x, a ), b );
+	}
+	DEVICE_INLINE
 	float compMin( float3 v )
 	{
 		return fmin( fmin( v.x, v.y ), v.z );
