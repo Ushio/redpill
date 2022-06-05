@@ -1750,7 +1750,7 @@ namespace rpml
 				{
 					static StandardRng rng;
 					float t = dt * ( nSteps + rng.draw() );
-					nSteps++;
+					
 					float x = input.ro[0] + input.rd[0] * t;
 					float y = input.ro[1] + input.rd[1] * t;
 					float z = input.ro[2] + input.rd[2] * t;
@@ -1773,6 +1773,8 @@ namespace rpml
 						nSkipEval++;
 						continue;
 					}
+
+					nSteps++;
 
 					points.push_back( x );
 					points.push_back( y );
@@ -2025,7 +2027,7 @@ namespace rpml
 				{
 					static StandardRng rng;
 					float t = dt * ( nSteps + rng.draw() );
-					nSteps++;
+					
 					float x = input.ro[0] + input.rd[0] * t;
 					float y = input.ro[1] + input.rd[1] * t;
 					float z = input.ro[2] + input.rd[2] * t;
@@ -2042,6 +2044,8 @@ namespace rpml
 					{
 						continue;
 					}
+
+					nSteps++;
 
 					x = clampss( x, 0.0f, 1.0f );
 					y = clampss( y, 0.0f, 1.0f );
