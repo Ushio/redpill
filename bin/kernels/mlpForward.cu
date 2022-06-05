@@ -269,7 +269,10 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                         dW = fma( X, Y, dW );
                     }
                 }
-                atomicAdd( &dMatBuffer[ elem( xi, yi_W, arg.m_Ws[i] ) ], dW );
+                if( dW != 0.0f )
+                {
+                    atomicAdd( &dMatBuffer[ elem( xi, yi_W, arg.m_Ws[i] ) ], dW );
+                } 
             }
         }
 
@@ -337,7 +340,11 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                     evaluator.evaluate( &w, &h, res, input );
                     uint32_t index = h % GRID_T;
                     int address = baseLevel + GRID_T * fdim + index;
-                    atomicAdd( &dMatBuffer[arg.gridFeatureLocation + address], w * derivative );
+                    float wd =  w * derivative;
+                    if ( wd != 0.0f )
+                    {
+                        atomicAdd( &dMatBuffer[arg.gridFeatureLocation + address], wd );
+                    }
                 }
             }
         }
