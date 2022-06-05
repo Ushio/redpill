@@ -10,6 +10,8 @@ typedef unsigned int uint32_t;
 #define INTRIN_SINF( x ) __sinf( x )
 #define INTRIN_COSF( x ) __cosf( x )
 #define INTRIN_POWF( x, y ) __powf( x, y )
+#define INTRIN_EXPF( x ) __expf( x )
+
 #else
 #define IS_HOST 1
 #define DEVICE
@@ -20,6 +22,7 @@ typedef unsigned int uint32_t;
 #define INTRIN_SINF( x ) std::sinf( x )
 #define INTRIN_COSF( x ) std::cosf( x )
 #define INTRIN_POWF( x, y ) std::powf( x, y )
+#define INTRIN_EXPF( x ) std::expf( x )
 #endif
 
 #define SHARED_TENSOR_ROW 16
@@ -27,7 +30,7 @@ typedef unsigned int uint32_t;
 namespace rpml
 {
 	const int GPU_MAT_ALIGNMENT = 8;
-	const float pi = 3.14159265358979323846f;
+	constexpr float pi = 3.14159265358979323846f;
 
 	enum class EncoderType
 	{
@@ -258,6 +261,7 @@ namespace rpml
 	{
 		GPUMat inputMat;
 		GPUMat outputMat;
+		GPUMat dirMat;
 		GPUMat m_Ws[16];
 		GPUMat m_Bs[16];
 		int gridFeatureLocation;
@@ -363,6 +367,16 @@ namespace rpml
 	float3 safe_inv_rd( float3 rd )
 	{
 		return clampf3( make_float3( 1.0f, 1.0f, 1.0f ) / rd, make_float3( -FLT_MAX, -FLT_MAX, -FLT_MAX ), make_float3( FLT_MAX, FLT_MAX, FLT_MAX ) );
+	}
+	DEVICE_INLINE
+	float nerfDensityActivation(float x)
+	{
+		return INTRIN_EXPF( x );
+	}
+	DEVICE_INLINE
+	float nerfRgbActivation( float x )
+	{
+		return 1.0f / ( 1.0f + INTRIN_EXPF( -x ) );
 	}
 #endif
 }

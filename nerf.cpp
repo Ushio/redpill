@@ -106,7 +106,7 @@ int main()
 
 		nlohmann::json frames = j["frames"];
 		// for( int i = 0; i < frames.size(); i++ )
-		for( int i = 0; i < 3; i++ )
+		for( int i = 0; i < 30; i++ )
 		{
 			nlohmann::json camera = frames[i];
 			glm::mat4 m = loadMatrix( camera["transform_matrix"] );
@@ -123,6 +123,8 @@ int main()
 			cameras.push_back( nc );
 		}
 	}
+
+	bool isCPUEval = false;
 
 	//std::string error;
 	//std::shared_ptr<FScene> scene = ReadWavefrontObj( GetDataPath( "nerf/Bulldozer.obj" ), error );
@@ -316,10 +318,16 @@ int main()
 		}
 
 		nerf_out.resize( nerf_in.size() );
-		nerf.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
-		nerfg.takeReference( nerf );
-		nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
-		//nerfg.
+
+		if( isCPUEval )
+		{
+			nerf.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
+		}
+		else
+		{
+			nerfg.takeReference( nerf );
+			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
+		}
 
 		int it = 0;
 		for( int y = 0; y < image.height(); ++y )
@@ -486,6 +494,7 @@ int main()
 		//ImGui::InputFloat( "globallocation.x", &globallocation.x, 0.001f );
 		//ImGui::InputFloat( "globallocation.y", &globallocation.y, 0.001f );
 		//ImGui::InputFloat( "globallocation.z", &globallocation.z, 0.001f );
+		ImGui::Checkbox( "isCPUEval", &isCPUEval );
 
 		static int index = 0;
 		if( ImGui::InputInt( "index", &index ) )
@@ -536,6 +545,7 @@ int main()
 			CaptureScreen( &img );
 			img.saveAsPng( "c.png" );
 		}
+
 		ImGui::End();
 
 		EndImGui();
