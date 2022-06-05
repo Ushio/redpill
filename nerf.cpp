@@ -326,7 +326,7 @@ int main()
 		else
 		{
 			nerfg.takeReference( nerf );
-			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
+			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
 		}
 
 		int it = 0;

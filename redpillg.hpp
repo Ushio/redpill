@@ -650,13 +650,13 @@ namespace rpml
 		//{
 		//	
 		//}
-		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement )
+		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement, oroStream stream )
 		{
 			if( !m_nerfInputBuffer || m_nerfInputBuffer->bytes() < nElement * sizeof( NeRFInput ) )
 			{
 				m_nerfInputBuffer = std::unique_ptr<Buffer>( new Buffer( nElement * sizeof( NeRFInput ) ) );
 			}
-			oroMemcpyHtoD( (oroDeviceptr)m_nerfInputBuffer->data(), (void*)inputs, nElement * sizeof( NeRFInput ) );
+			oroMemcpyHtoDAsync( (oroDeviceptr)m_nerfInputBuffer->data(), (void*)inputs, nElement * sizeof( NeRFInput ), stream );
 			if( !m_nerfOutputBuffer || m_nerfOutputBuffer->bytes() < nElement * sizeof( NeRFOutput ) )
 			{
 				m_nerfOutputBuffer = std::unique_ptr<Buffer>( new Buffer( nElement * sizeof( NeRFOutput ) ) );
@@ -666,7 +666,6 @@ namespace rpml
 			{
 				m_rayBuffer = std::unique_ptr<Buffer>( new Buffer( nElement * sizeof( NeRFRay ) ) );
 			}
-			oroMemsetD8( (oroDeviceptr)m_rayBuffer->data(), 0, m_rayBuffer->bytes() );
 
 			int location = 0;
 			GPUMat inputGPU  = allocateGPUMat( &location, nElement * MLP_STEP, 3 );
@@ -678,7 +677,7 @@ namespace rpml
 			}
 
 			inputGPU.m_row = 0;
-			oroMemcpyHtoD( (oroDeviceptr)m_nerfSamplesBuffer->data(), &inputGPU, sizeof( GPUMat ) );			
+			oroMemcpyHtoDAsync( (oroDeviceptr)m_nerfSamplesBuffer->data(), &inputGPU, sizeof( GPUMat ), stream );			
 			{
 				ShaderArgument args;
 				args.add( m_nerfInputBuffer->data() );
@@ -689,10 +688,10 @@ namespace rpml
 				args.add( nElement );
 
 				int gridDim = div_round_up( nElement, 64 );
-				m_forwardShader->launch( "nerfRays", args, gridDim, 1, 1, 64, 1, 1, nullptr );
+				m_forwardShader->launch( "nerfRays", args, gridDim, 1, 1, 64, 1, 1, stream );
 			}
 
-			oroMemcpyDtoH( &inputGPU, ( oroDeviceptr ) m_nerfSamplesBuffer->data(), sizeof( GPUMat ) );
+			oroMemcpyDtoH( &inputGPU, ( oroDeviceptr ) m_nerfSamplesBuffer->data(), sizeof( GPUMat ) ); // sync
 			outputGPU.m_row = inputGPU.m_row;
 			dirGPU.m_row = inputGPU.m_row;
 
@@ -715,7 +714,7 @@ namespace rpml
 
 				int gridDim = div_round_up( inputGPU.m_row, SHARED_TENSOR_ROW );
 				printf( "gridDim %d\n", gridDim );
-				m_forwardShader->launch( "nerfForward", args, gridDim, 1, 1, 1, 64, 1, nullptr );
+				m_forwardShader->launch( "nerfForward", args, gridDim, 1, 1, 1, 64, 1, stream );
 			}
 
 			{
@@ -729,12 +728,12 @@ namespace rpml
 				// printf( "r %d\n", outputGPU.m_row );
 
 				int gridDim = div_round_up( nElement, 64 );
-				m_forwardShader->launch( "nerfEval", args, gridDim, 1, 1, 64, 1, 1, nullptr );
+				m_forwardShader->launch( "nerfEval", args, gridDim, 1, 1, 64, 1, 1, stream );
 			}
 
-			oroMemcpyDtoH( outputs, (oroDeviceptr)m_nerfOutputBuffer->data(), nElement * sizeof( NeRFOutput ) );
+			oroMemcpyDtoHAsync( outputs, (oroDeviceptr)m_nerfOutputBuffer->data(), nElement * sizeof( NeRFOutput ), stream );
 
-			oroStreamSynchronize( 0 );
+			oroStreamSynchronize( stream );
 
 		}
 		MultiResolutionHashEncoder::Config m_hashConfig;
