@@ -530,9 +530,10 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 	{
         int nSteps = 0;
         float dt = sqrt( 3.0f ) / MLP_STEP;
+        float bias = dt * 0.5f;
         for( int i = 0 ; i < 1024 ; ++i )
         {
-            float3 p = ro + rd * ( h.x + dt * i );
+            float3 p = ro + rd * ( h.x + bias + dt * i );
             const float eps = 0.00001f;
             if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
             {
@@ -845,6 +846,7 @@ extern "C" __global__ void nerfEval( NeRFRay *rays, NeRFOutput* outputs, float* 
 
     float oColor[3] = {0.0f, 0.0f, 0.0f};
     float T = 1.0f;
+    const float Teps = 1e-4f;
     
     int eval_beg = rays[x].eval_beg;
     int eval_end = rays[x].eval_end;
@@ -869,7 +871,7 @@ extern "C" __global__ void nerfEval( NeRFRay *rays, NeRFOutput* outputs, float* 
 
         T *= ( 1.0f - a );
 
-        if( T < 0.0001f )
+        if( T < Teps )
             break;
     }
     // printf("oColor %f %f %f\n", oColor[0], oColor[1], oColor[2]);

@@ -540,7 +540,7 @@ namespace rpml
 	class OptimizerAdam : public Optimizer
 	{
 	public:
-		OptimizerAdam( float alpha, float beta1 = 0.9f, float beta2 = 0.999f, float e = 10.0e-15f ) 
+		OptimizerAdam( float alpha, float beta1 = 0.9f, float beta2 = 0.99f, float e = 1.0e-15f ) 
 			: m_alpha( alpha ), m_beta1( beta1 ), m_beta2( beta2 ), m_beta1t( 1.0f ), m_beta2t( 1.0f ), m_e( e )
 		{
 		}
@@ -750,10 +750,8 @@ namespace rpml
 			: Layer( i, o ) 
 			, m_W( i, o ) 
 			, m_dW( i, o )
-#if ENABLE_BIAS
 			, m_b( 1, o ) 
 			, m_db( 1, o )
-#endif
 		{
 			m_oW = std::unique_ptr<Optimizer>( newOptimizer( optimizerType, learningRate ) );
 			m_oW->initialize( m_W.row(), m_W.col() );
@@ -1223,10 +1221,14 @@ namespace rpml
 						{
 							hashInput[d] = m_inputs[ iy * dim + d ];
 						}
-						HashGridVisitor visitor( dim );
+						// HashGridVisitor visitor( dim );
+						HashGridEvaluator visitor( dim );
 						while( visitor.moveNext() )
 						{
-							uint32_t h = visitor.evaluate( res, hashInput.data() );
+							// uint32_t h = visitor.evaluate( res, hashInput.data() );
+							float w;
+							uint32_t h;
+							visitor.evaluate( &w, &h, res, hashInput.data() );
 							uint32_t index = h % m_config.T;
 							m_optimizers[l]->atomicOptimizeHashGridRow( &m_features[l], &m_dfeatures[l], nElement, index );
 						}
@@ -1516,7 +1518,7 @@ namespace rpml
 	};
 
 
-	static const float Teps = 0.0001f;
+	static const float Teps = 1e-4f;
 
 	static const int OC_BASE_SIZE = 128;
 	static const float OC_MIN_A = 0.008f;
@@ -1565,8 +1567,9 @@ namespace rpml
 		{
 			std::unique_ptr<Rng> rng = std::unique_ptr<Rng>( new StandardRng() );
 			
-			float learningRate = 256;
-			InitializationType initializerType = InitializationType::He;
+			// float learningRate = 256;
+			float learningRate = 16000 ;
+			InitializationType initializerType = InitializationType::Xavier;
 			int input = 3; /* xyz */
 			int output = 0;
 
@@ -1745,11 +1748,14 @@ namespace rpml
 				NeRFMarching m;
 				m.beg = points.size() / 3;
 
+				static StandardRng rng;
+				float bias = dt * rng.draw();
+
 				int nSteps = 0;
 				for( ; ; )
 				{
-					static StandardRng rng;
-					float t = dt * ( nSteps + rng.draw() );
+					
+					float t = dt * ( nSteps + bias );
 					
 					float x = input.ro[0] + input.rd[0] * t;
 					float y = input.ro[1] + input.rd[1] * t;
@@ -1926,7 +1932,6 @@ namespace rpml
 							float coef = T * a;
 							oColor2[k] += coef * c[k];
 							dL_dC( k, localJ ) = rgbActivationDerivative( inputMat( k, localJ ) ) * coef * dColor[k];
-							// printf( "d = %f, a = %f, {%f %f %f} \n", sigma, a, coef * dColor[0], coef * dColor[1], coef * dColor[2] );
 						}
 						T *= ( 1.0f - a );
 
@@ -2015,6 +2020,7 @@ namespace rpml
 			points.clear();
 
 			const float dt = std::sqrt( 3.0f ) / MLP_STEP;
+			const float bias = dt * 0.5f;
 			for( int64_t i = 0; i < nElement; i++ )
 			{
 				NeRFInput input = inputs[i];
@@ -2025,8 +2031,7 @@ namespace rpml
 				int nSteps = 0;
 				for( ;; )
 				{
-					static StandardRng rng;
-					float t = dt * ( nSteps + rng.draw() );
+					float t = dt * ( nSteps + bias );
 					
 					float x = input.ro[0] + input.rd[0] * t;
 					float y = input.ro[1] + input.rd[1] * t;
