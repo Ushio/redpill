@@ -1568,7 +1568,7 @@ namespace rpml
 			std::unique_ptr<Rng> rng = std::unique_ptr<Rng>( new StandardRng() );
 			
 			// float learningRate = 256;
-			float learningRate = 16000 ;
+			float learningRate = 4000 ;
 			InitializationType initializerType = InitializationType::Xavier;
 			int input = 3; /* xyz */
 			int output = 0;

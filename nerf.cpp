@@ -34,6 +34,11 @@ glm::mat4 loadMatrix( nlohmann::json j )
 		row2[0].get<float>(), row2[1].get<float>(), row2[2].get<float>(), row2[3].get<float>(),
 		row3[0].get<float>(), row3[1].get<float>(), row3[2].get<float>(), row3[3].get<float>()
 	);
+	//for(int i = 0 ; i < 16 ; ++i)
+	//{
+	//	printf( "%f, ", glm::value_ptr( m )[i] );
+	//}
+	//printf( "\n" );
 	m = glm::transpose( m );
 	return m;
 }
@@ -95,7 +100,8 @@ int main()
 	NeRFg nerfg( pr::GetDataPath( "kernels" ) );
 	std::vector<NerfCamera> cameras;
 
-	for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )
+	// for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )
+	for( auto filePath : { "nerf/transforms_train.json" } )
 	{
 		std::ifstream ifs( GetDataPath( filePath ) );
 		nlohmann::json j;
@@ -105,11 +111,15 @@ int main()
 		float fovy = camera_angle_x.get<float>();
 
 		nlohmann::json frames = j["frames"];
-		// for( int i = 0; i < frames.size(); i++ )
-		for( int i = 0; i < 30; i++ )
-		{
+
+		std::mutex mu;
+		pr::ParallelFor( frames.size(), [&]( int i ) {
 			nlohmann::json camera = frames[i];
 			glm::mat4 m = loadMatrix( camera["transform_matrix"] );
+
+			glm::mat4 s = glm::scale( glm::identity<glm::mat4>(), glm::vec3( 0.4f, 0.4f, 0.4f ) );
+			glm::mat4 t = glm::translate( glm::identity<glm::mat4>(), glm::vec3( 0.5f, 0.5f, 0.5f ) );
+			m = t * s * m;
 
 			NerfCamera nc = {};
 			nc.fovy = fovy;
@@ -120,8 +130,30 @@ int main()
 			Result r = nc.image.load( file.c_str() );
 			PR_ASSERT( r == Result::Sucess, "" );
 			// printf( "%d %d\n", nc.image.width(), nc.image.height() );
+
+			std::lock_guard<std::mutex> lc( mu );
 			cameras.push_back( nc );
-		}
+		} );
+		//for( int i = 0; i < frames.size(); i++ )
+		//{
+		//	nlohmann::json camera = frames[i];
+		//	glm::mat4 m = loadMatrix( camera["transform_matrix"] );
+
+		//	glm::mat4 s = glm::scale( glm::identity<glm::mat4>(), glm::vec3( 0.4f, 0.4f, 0.4f ) );
+		//	glm::mat4 t = glm::translate( glm::identity<glm::mat4>(), glm::vec3( 0.5f, 0.5f, 0.5f ) );
+		//	m = t * s * m;
+
+		//	NerfCamera nc = {};
+		//	nc.fovy = fovy;
+		//	nc.transform = m;
+		//	nc.path = camera["file_path"].get<std::string>();
+
+		//	std::string file = JoinPath( GetDataPath( "nerf" ), nc.path ) + ".png";
+		//	Result r = nc.image.load( file.c_str() );
+		//	PR_ASSERT( r == Result::Sucess, "" );
+		//	// printf( "%d %d\n", nc.image.width(), nc.image.height() );
+		//	cameras.push_back( nc );
+		//}
 	}
 
 	bool isCPUEval = false;
@@ -197,14 +229,19 @@ int main()
 
 		float scale = 0.5f;
 
-		for(int k = 0 ; k < 2 ; ++k)
+		const int n_rays_per_batch = 4096;
+
+		static int iterations = 0; 
+		// if( iterations++ < 8 )
+		for(int k = 0 ; k < 1 ; ++k)
 		{
 			inputs.clear();
 			refs.clear();
 
-			for( int i = 0; i < cameras.size(); i++ ) 
+			for( int i = 0; i < n_rays_per_batch; ++i )
 			{
-				const NerfCamera& nc = cameras[i];
+				int camIdx = rng.drawUInt() % cameras.size();
+				const NerfCamera& nc = cameras[camIdx];
 
 				glm::vec3 o = { 0, 0, 0 };
 				glm::vec3 up = { 0, 1, 0 };
@@ -226,46 +263,45 @@ int main()
 				GetCameraMatrix( cam3d, &proj, &view );
 				CameraRayGenerator raygen( view, proj, 800, 800 );
 
-				for( int j = 0; j < 2 ; ++j )
+				glm::vec3 ro;
+				glm::vec3 rd;
+				int x = rng.drawUInt() % 800;
+				int y = rng.drawUInt() % 800;
+				raygen.shoot( &ro, &rd, x, y, rng.draw(), rng.draw() );
+				rd = glm::normalize( rd );
+
+				glm::vec3 one_over_rd = safe_inv_rd( rd );
+				// glm::vec3 input_ro = ro * scale * 0.75f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+				glm::vec3 input_ro = ro;
+				glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
+
+				if( h.x /* min */ < h.y /* max */ )
 				{
-					glm::vec3 ro;
-					glm::vec3 rd;
-					int x = rng.drawUInt() % 800;
-					int y = rng.drawUInt() % 800;
-					raygen.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
-					rd = glm::normalize( rd );
+					input_ro = input_ro + rd * h.x; // move to inside
 
-					glm::vec3 one_over_rd = safe_inv_rd( rd );
-					glm::vec3 input_ro = ro * scale * 0.75f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
-					glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
+					NeRFInput input;
+					input.ro[0] = input_ro.x;
+					input.ro[1] = input_ro.y;
+					input.ro[2] = input_ro.z;
+					input.rd[0] = rd.x;
+					input.rd[1] = rd.y;
+					input.rd[2] = rd.z;
+					inputs.push_back( input );
 
-					if( h.x /* min */ < h.y /* max */ )
-					{
-						input_ro = input_ro + rd * h.x; // move to inside
-
-						NeRFInput input;
-						input.ro[0] = input_ro.x;
-						input.ro[1] = input_ro.y;
-						input.ro[2] = input_ro.z;
-						input.rd[0] = rd.x;
-						input.rd[1] = rd.y;
-						input.rd[2] = rd.z;
-						inputs.push_back( input );
-
-						glm::uvec4 color = nc.image( x, y );
-						NeRFOutput output;
-						output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
-						output.color[1] = std::pow( (float)color.y / 255.0f, 2.2f );
-						output.color[2] = std::pow( (float)color.z / 255.0f, 2.2f );
-
-						// printf( "%f %f %f\n", output.color[0], output.color[1], output.color[2] );
-						refs.push_back( output );
-					}
+					glm::uvec4 color = nc.image( x, y );
+					NeRFOutput output = {};
+					output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
+					output.color[1] = std::pow( (float)color.y / 255.0f, 2.2f );
+					output.color[2] = std::pow( (float)color.z / 255.0f, 2.2f );
+					output.color[3] = (float)color.z / 255.0f;
+					// printf( "%f %f %f\n", output.color[0], output.color[1], output.color[2] );
+					refs.push_back( output );
 				}
 			}
-			// printf( "input: %d\n", (int)inputs.size() );
+			printf( "input: %d\n", (int)inputs.size() );
 			Stopwatch sw;
-			loss = nerf.train( inputs.data(), refs.data(), inputs.size() );
+			nerfg.train( inputs.data(), refs.data(), inputs.size(), stream );
+			//loss = nerf.train( inputs.data(), refs.data(), inputs.size() );
 			printf( "loss %f, t = %f\n", loss / inputs.size(), sw.elapsed() );
 		}
 
@@ -325,7 +361,7 @@ int main()
 		}
 		else
 		{
-			nerfg.takeReference( nerf );
+			//nerfg.takeReference( nerf );
 			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
 		}
 
@@ -477,6 +513,13 @@ int main()
 		//	glm::vec3 forward = lookat - o;
 		//	DrawArrow( o, o + forward * 0.1f, 0.01f, { 0, 0, 255 } );
 		//	DrawArrow( o, o + up * 0.1f, 0.01f, { 0, 255, 0 } );
+		//}
+
+		//for( auto imp : inputs )
+		//{
+		//	glm::vec3 ro = { imp.ro[0], imp.ro[1], imp.ro[2] };
+		//	glm::vec3 rd = { imp.rd[0], imp.rd[1], imp.rd[2] };
+		//	DrawArrow( ro, ro + rd *2.0f, 0.001f, { 255, 255, 255 } );
 		//}
 
 		PopGraphicState();

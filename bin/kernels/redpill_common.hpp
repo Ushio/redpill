@@ -12,6 +12,8 @@ typedef unsigned int uint32_t;
 #define INTRIN_POWF( x, y ) __powf( x, y )
 #define INTRIN_EXPF( x ) __expf( x )
 
+#include "helper_math.h"
+
 #else
 #define IS_HOST 1
 #define DEVICE
@@ -236,7 +238,7 @@ namespace rpml
 	const int NERF_DENSITY_LAYER_END = 2;
 	const int NERF_COLOR_LAYER_BEG = 2;
 	const int NERF_COLOR_LAYER_END = 5;
-	const int MLP_STEP = 1024;
+	const int MLP_STEP = 64;
 	struct NeRFInput
 	{
 		float ro[3]; float pad0;
@@ -269,52 +271,74 @@ namespace rpml
 		int padd1;
 		int padd2;
 	};
+	struct NeRFTrainArg
+	{
+		GPUMat inputMat;
+		GPUMat outputMat;
+		GPUMat dirMat;
+		GPUMat m_Ws[16];
+		GPUMat m_Bs[16];
+		GPUMat m_Is[16];
+		int gridFeatureLocation;
+		int padd0;
+		int padd1;
+		int padd2;
+	};
 #if IS_HOST == 0
-	DEVICE_INLINE
-	float3 operator*( float3 a, float3 b )
-	{
-		float3 r;
-		r.x = a.x * b.x;
-		r.y = a.y * b.y;
-		r.z = a.z * b.z;
-		return r;
-	}
-	DEVICE_INLINE
-	float3 operator*( float3 a, float b )
-	{
-		float3 r;
-		r.x = a.x * b;
-		r.y = a.y * b;
-		r.z = a.z * b;
-		return r;
-	}
-	DEVICE_INLINE
-	float3 operator-( float3 a, float3 b )
-	{
-		float3 r;
-		r.x = a.x - b.x;
-		r.y = a.y - b.y;
-		r.z = a.z - b.z;
-		return r;
-	}
-	DEVICE_INLINE
-	float3 operator+( float3 a, float3 b )
-	{
-		float3 r;
-		r.x = a.x + b.x;
-		r.y = a.y + b.y;
-		r.z = a.z + b.z;
-		return r;
-	}
-	DEVICE_INLINE
-	float3 operator/( float3 a, float3 b )
-	{
-		float3 r;
-		r.x = a.x / b.x;
-		r.y = a.y / b.y;
-		r.z = a.z / b.z;
-		return r;
-	}
+	// DEVICE_INLINE
+	// float3 operator*( float3 a, float3 b )
+	// {
+	// 	float3 r;
+	// 	r.x = a.x * b.x;
+	// 	r.y = a.y * b.y;
+	// 	r.z = a.z * b.z;
+	// 	return r;
+	// }
+	// DEVICE_INLINE
+	// float3 operator*( float3 a, float b )
+	// {
+	// 	float3 r;
+	// 	r.x = a.x * b;
+	// 	r.y = a.y * b;
+	// 	r.z = a.z * b;
+	// 	return r;
+	// }
+	// 	DEVICE_INLINE
+	// float3 operator*( float a, float3 b )
+	// {
+	// 	float3 r;
+	// 	r.x = b.x * a;
+	// 	r.y = b.y * a;
+	// 	r.z = b.z * a;
+	// 	return r;
+	// }
+	// DEVICE_INLINE
+	// float3 operator-( float3 a, float3 b )
+	// {
+	// 	float3 r;
+	// 	r.x = a.x - b.x;
+	// 	r.y = a.y - b.y;
+	// 	r.z = a.z - b.z;
+	// 	return r;
+	// }
+	// DEVICE_INLINE
+	// float3 operator+( float3 a, float3 b )
+	// {
+	// 	float3 r;
+	// 	r.x = a.x + b.x;
+	// 	r.y = a.y + b.y;
+	// 	r.z = a.z + b.z;
+	// 	return r;
+	// }
+	// DEVICE_INLINE
+	// float3 operator/( float3 a, float3 b )
+	// {
+	// 	float3 r;
+	// 	r.x = a.x / b.x;
+	// 	r.y = a.y / b.y;
+	// 	r.z = a.z / b.z;
+	// 	return r;
+	// }
 	DEVICE_INLINE
 	float3 fmaxf3( float3 a, float3 b )
 	{
@@ -382,6 +406,11 @@ namespace rpml
 	float nerfRgbActivation( float x )
 	{
 		return 1.0f / ( 1.0f + INTRIN_EXPF( -x ) );
+	}
+	DEVICE_INLINE
+	float nerfRgbActivationDrivativeY( float Y )
+	{
+		return Y * ( 1.0f - Y );
 	}
 #endif
 }

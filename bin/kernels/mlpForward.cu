@@ -1,4 +1,5 @@
 #include "redpill_common.hpp"
+#include "helper_math.h"
 
 #ifndef GRID_L
     #define GRID_INPUT_DIM 1
@@ -123,6 +124,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 }
                 setTensor( tensor, xi, yi_local, feature );
 
+                // store intermediates
                 int yi = yi_global_base + yi_local;
                 if( yi < arg.inputMat.m_row )
                 {
@@ -172,6 +174,8 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
             for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
             {
                 setTensor( tensor, xi, yi_local, value[yi_local] );
+
+                // store intermediates
                 int yi = yi_global_base + yi_local;
                 if( yi < arg.inputMat.m_row )
                 {
@@ -531,7 +535,7 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
         int nSteps = 0;
         float dt = sqrt( 3.0f ) / MLP_STEP;
         float bias = dt * 0.5f;
-        for( int i = 0 ; i < 1024 ; ++i )
+        for( int i = 0 ; i < MLP_STEP ; ++i )
         {
             float3 p = ro + rd * ( h.x + bias + dt * i );
             const float eps = 0.00001f;
@@ -546,11 +550,10 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
         int eval_end = eval_beg + nSteps;
         rays[x].eval_beg = eval_beg;
         rays[x].eval_end = eval_end;
-        // printf( "d %d %f %f %f\n", x, rd.x, rd.y, rd.z );
 
         for( int i = 0 ; i < nSteps ; ++i )
         {
-            float3 p = ro + rd * ( h.x + dt * i );
+            float3 p = ro + rd * ( h.x + bias + dt * i );
 
             p.x = fclamp( p.x, 0.0f, 1.0f );
             p.y = fclamp( p.y, 0.0f, 1.0f );
@@ -758,13 +761,27 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
         __syncthreads();
     }
 
+    // // density
+    // if( xi == 0 )
+    // {
+    //     for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+    //     {
+    //         float density = value[yi_local];
+    //         int yi = yi_global_base + yi_local;
+    //         if( yi < arg.outputMat.m_row )
+    //         {
+    //             intermediates[ elem( 3, yi, arg.outputMat )] = density;
+    //         }
+    //     }
+    // }
+
     // directional
     int nItrEncode = div_round_up( SHARED_TENSOR_ROW, 64 );
     for(int i = 0 ; i < nItrEncode ; i++ )
     {
         int index = i * 64 + xi;
         int yi = yi_global_base + index;
-        if( yi < arg.outputMat.m_row )
+        if( yi < SHARED_TENSOR_ROW )
         {
             float x = intermediates[ elem( 0, yi, arg.dirMat )];
             float y = intermediates[ elem( 1, yi, arg.dirMat )];
@@ -844,7 +861,7 @@ extern "C" __global__ void nerfEval( NeRFRay *rays, NeRFOutput* outputs, float* 
     }
     const float dt = sqrt( 3.0f ) / MLP_STEP;
 
-    float oColor[3] = {0.0f, 0.0f, 0.0f};
+    float3 oColor = make_float3( 0.0f, 0.0f, 0.0f );
     float T = 1.0f;
     const float Teps = 1e-4f;
     
@@ -855,29 +872,511 @@ extern "C" __global__ void nerfEval( NeRFRay *rays, NeRFOutput* outputs, float* 
         float density = intermediates[elem( 3, yi, nerfSamples )];
         float sigma = nerfDensityActivation( density );
 
-        float c[3];
-        for( int k = 0; k < 3; k++ )
-        {
-            c[k] = nerfRgbActivation( intermediates[elem( k, yi, nerfSamples )] );
-        }
-        // printf( "c %f %f %f\n", c[0], c[1], c[2] );
+        float3 c = make_float3(
+            nerfRgbActivation( intermediates[elem( 0, yi, nerfSamples )] ),
+            nerfRgbActivation( intermediates[elem( 1, yi, nerfSamples )] ),
+            nerfRgbActivation( intermediates[elem( 2, yi, nerfSamples )] )
+        );
         
         float a = 1.0f - INTRIN_EXPF( -sigma * dt );
-
-        for( int k = 0; k < 3; k++ )
-        {
-            oColor[k] += T * a * c[k];
-        }
+        oColor += T * a * c;
 
         T *= ( 1.0f - a );
 
         if( T < Teps )
             break;
     }
-    // printf("oColor %f %f %f\n", oColor[0], oColor[1], oColor[2]);
 
-    for( int k = 0; k < 3; ++k )
+    outputs[x].color[0] = oColor.x;
+    outputs[x].color[1] = oColor.y;
+    outputs[x].color[2] = oColor.z;
+}
+
+extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuffer, NeRFTrainArg arg ) 
+{
+    __shared__ float tensor[64 * SHARED_TENSOR_ROW];
+
+    int yi_global_base = blockIdx.x * SHARED_TENSOR_ROW;
+    int xi = threadIdx.y;
+    float value[SHARED_TENSOR_ROW];
+
+    if( xi < arg.inputMat.m_col )
     {
-        outputs[x].color[k] = oColor[k];
+        float vs[SHARED_TENSOR_ROW];
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            int yi = yi_global_base + yi_local;
+            if( yi < arg.inputMat.m_row )
+            {
+                vs[yi_local] = intermediates[elem( xi, yi, arg.inputMat)];
+            }
+            else
+            {
+                vs[yi_local] = 0.0f;
+            }
+        }
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            setTensor( tensor, xi, yi_local, vs[yi_local] );
+        }
+    }
+    __syncthreads();
+
+    {
+        int level = xi / GRID_F;
+        int fdim  = xi % GRID_F;
+        int baseLevel = GRID_T * GRID_F * level;
+        float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            float input[GRID_INPUT_DIM];
+            for( int x = 0 ; x < GRID_INPUT_DIM ; x++ )
+            {
+                input[x] = getTensor( tensor, x, yi_local );
+            }
+            __syncthreads();
+
+            if( level < GRID_L )
+            {
+                HashGridEvaluator evaluator( GRID_INPUT_DIM );
+                float feature = 0.0f;
+                while( evaluator.moveNext() )
+                {
+                    float w;
+                    uint32_t h;
+                    evaluator.evaluate( &w, &h, res, input );
+                    uint32_t index = h % GRID_T;
+                    int address = baseLevel + GRID_T * fdim + index;
+                    float f = matBuffer[arg.gridFeatureLocation + address];
+                    feature += w * f;
+                }
+                setTensor( tensor, xi, yi_local, feature );
+                
+                int yi = yi_global_base + yi_local;
+                if( yi < arg.inputMat.m_row )
+                {
+                    intermediates[elem( xi, yi, arg.m_Is[0] )] = value[yi_local];
+                }
+            }
+        }
+        __syncthreads();
+    }
+    
+    for( int i = NERF_DENSITY_LAYER_BEG ; i < NERF_DENSITY_LAYER_END ; i++ )
+    {
+        int row = arg.m_Ws[i].m_row; // input
+        int col = arg.m_Ws[i].m_col; // output
+
+        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            value[yi_local] = bias;
+        }
+        
+        if( xi < col )
+        {
+            for( int j = 0 ; j < row ; j++ ) 
+            {
+                float b = matBuffer[ elem( xi /* output xi */, j, arg.m_Ws[i] ) ];
+                for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+                {
+                    float a = getTensor( tensor, j, yi_local );
+                    value[yi_local] = fma( a, b, value[yi_local] );
+                }
+            }
+            
+            float lowerbounds = i + 1 != NERF_DENSITY_LAYER_END ? 0.0f : -3.40282e+38f;
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                value[yi_local] = fmaxf( value[yi_local], lowerbounds );
+            }
+        }
+
+        __syncthreads();
+
+        if( xi < col )
+        {
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                setTensor( tensor, xi, yi_local, value[yi_local] );
+                
+                // store intermediates
+                int yi = yi_global_base + yi_local;
+                if( yi < arg.inputMat.m_row )
+                {
+                    intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = value[yi_local];
+                }
+            }
+        }
+
+        __syncthreads();
+    }
+
+    // density
+    if( xi == 0 )
+    {
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            float density = value[yi_local];
+            int yi = yi_global_base + yi_local;
+            if( yi < arg.outputMat.m_row )
+            {
+                intermediates[ elem( 3, yi, arg.outputMat )] = density;
+            }
+        }
+    }
+
+    // directional
+    int nItrEncode = div_round_up( SHARED_TENSOR_ROW, 64 );
+    for(int i = 0 ; i < nItrEncode ; i++ )
+    {
+        int index = i * 64 + xi;
+        int yi = yi_global_base + index;
+        if( yi < SHARED_TENSOR_ROW )
+        {
+            float x = intermediates[ elem( 0, yi, arg.dirMat )];
+            float y = intermediates[ elem( 1, yi, arg.dirMat )];
+            float z = intermediates[ elem( 2, yi, arg.dirMat )];
+            sh_encode( tensor, index, x, y, z );
+        }
+    }
+    __syncthreads(); 
+
+    for( int i = NERF_COLOR_LAYER_BEG ; i < NERF_COLOR_LAYER_END ; i++ )
+    {
+        int row = arg.m_Ws[i].m_row; // input
+        int col = arg.m_Ws[i].m_col; // output
+
+        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            value[yi_local] = bias;
+        }
+        
+        if( xi < col )
+        {
+            for( int j = 0 ; j < row ; j++ ) 
+            {
+                float b = matBuffer[ elem( xi /* output xi */, j, arg.m_Ws[i] ) ];
+                for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+                {
+                    float a = getTensor( tensor, j, yi_local );
+                    value[yi_local] = fma( a, b, value[yi_local] );
+                }
+            }
+            
+            float lowerbounds = i + 1 != NERF_COLOR_LAYER_END ? 0.0f : -3.40282e+38f;
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                value[yi_local] = fmaxf( value[yi_local], lowerbounds );
+            }
+        }
+
+        __syncthreads();
+
+        if( xi < col )
+        {
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                setTensor( tensor, xi, yi_local, value[yi_local] );
+                
+                // store intermediates
+                int yi = yi_global_base + yi_local;
+                if( yi < arg.inputMat.m_row )
+                {
+                    intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = value[yi_local];
+                }
+            }
+        }
+
+        __syncthreads();
+    }
+
+    if( xi < arg.outputMat.m_col - 1 /* !important! don't override density */ )
+    {
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            value[yi_local] = getTensor( tensor, xi, yi_local );
+        }
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            int yi = yi_global_base + yi_local;
+            if( yi < arg.outputMat.m_row )
+            {
+                intermediates[ elem( xi, yi, arg.outputMat )] = value[yi_local];
+            }
+        }
+    }
+}
+
+extern "C" __global__ void nerfDerivative( NeRFRay *rays, NeRFOutput* refs, float* intermediates, GPUMat nerfSamples, int nElement ) 
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if( nElement <= x )
+    {
+        return;
+    }
+
+    // forward
+    const float dt = sqrt( 3.0f ) / MLP_STEP;
+
+    float3 oColor = make_float3( 0.0f, 0.0f, 0.0f );
+    float T = 1.0f;
+    const float Teps = 1e-4f;
+    
+    int eval_beg = rays[x].eval_beg;
+    int eval_end = rays[x].eval_end;
+    for( int yi = eval_beg; yi < eval_end; yi++ )
+    {
+        float density = intermediates[elem( 3, yi, nerfSamples )];
+        float sigma = nerfDensityActivation( density );
+
+        float3 c = make_float3(
+            nerfRgbActivation( intermediates[elem( 0, yi, nerfSamples )] ),
+            nerfRgbActivation( intermediates[elem( 1, yi, nerfSamples )] ),
+            nerfRgbActivation( intermediates[elem( 2, yi, nerfSamples )] )
+        );
+        
+        float a = 1.0f - INTRIN_EXPF( -sigma * dt );
+        oColor += T * a * c;
+
+        T *= ( 1.0f - a );
+
+        if( T < Teps )
+            break;
+    }
+
+    T = 1.0f; // important!!!! 
+
+    // mse derivative
+    float3 refColor = make_float3( refs[x].color[0], refs[x].color[1], refs[x].color[2] );
+    float3 dColor = oColor - refColor;
+
+    // backward
+    float3 oColor2 = make_float3( 0.0f, 0.0f, 0.0f );
+    int tail_yi = eval_end;
+    for( int yi = eval_beg; yi < eval_end; yi++ )
+    {
+        float density = intermediates[elem( 3, yi, nerfSamples )];
+        float sigma = nerfDensityActivation( density );
+        float3 c = make_float3(
+            nerfRgbActivation( intermediates[elem( 0, yi, nerfSamples )] ),
+            nerfRgbActivation( intermediates[elem( 1, yi, nerfSamples )] ),
+            nerfRgbActivation( intermediates[elem( 2, yi, nerfSamples )] )
+        );
+        float a = 1.0f - INTRIN_EXPF( -sigma * dt );
+        float coefficient = T * a;
+        oColor2 += coefficient * c;
+
+        float scale = 128.0f;
+        float3 dRGB = make_float3( nerfRgbActivationDrivativeY( c.x ), nerfRgbActivationDrivativeY( c.y ), nerfRgbActivationDrivativeY( c.z ) );
+        float3 dOutput = dRGB * coefficient * dColor;
+        intermediates[elem( 0, yi, nerfSamples )] = scale * dOutput.x;
+        intermediates[elem( 1, yi, nerfSamples )] = scale * dOutput.y;
+        intermediates[elem( 2, yi, nerfSamples )] = scale * dOutput.z;
+
+        T *= ( 1.0f - a );
+
+        float3 S = oColor - oColor2;
+        float dSigma = dt * dot( T * c - S, dColor );
+        intermediates[elem( 3, yi, nerfSamples )] = scale * dSigma;
+
+        if( T < Teps )
+        {
+            tail_yi = yi + 1;
+            break;
+        }
+    }
+    for( int yi = tail_yi; yi < eval_end; yi++ )
+    {
+        for( int i = 0 ; i < 4; i++ )
+        {
+            intermediates[elem( i, yi, nerfSamples )] = 0.0f;
+        }
+    }
+}
+
+extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBuffer, float* dMatBuffer, NeRFTrainArg arg ) 
+{
+    __shared__ float tensor[64 * SHARED_TENSOR_ROW];
+    
+    int yi_global_base = blockIdx.x * SHARED_TENSOR_ROW;
+    int xi = threadIdx.y;
+    float value[SHARED_TENSOR_ROW];
+
+    if( xi < arg.outputMat.m_col - 1 /* no need to read density derivative here */ )
+    {
+        float vs[SHARED_TENSOR_ROW];
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            int yi = yi_global_base + yi_local;
+            if( yi < arg.outputMat.m_row )
+            {
+                vs[yi_local] = intermediates[elem( xi, yi, arg.outputMat )];
+            }
+            else
+            {
+                vs[yi_local] = 0.0f;
+            }
+        }
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            setTensor( tensor, xi, yi_local, vs[yi_local] );
+        }
+    }
+    __syncthreads();
+
+    // backward
+    for( int i = NERF_COLOR_LAYER_END - 1 ; 0 <= i ; i-- )
+    {
+        int row = arg.m_Ws[i].m_row; // input
+        int col = arg.m_Ws[i].m_col; // output
+
+        // load density
+        if( i == NERF_DENSITY_LAYER_END - 1 ) 
+        {
+            if( xi == 0 )
+            {
+                for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+                {
+                    float v = getTensor( tensor, xi, yi_local );
+                    int yi = yi_global_base + yi_local;
+                    if( yi < arg.outputMat.m_row )
+                    {
+                        v += intermediates[elem( 3, yi, arg.outputMat )];
+                    }
+                    setTensor( tensor, xi, yi_local, v );
+                }
+            }
+            __syncthreads();
+        }
+
+        if( xi < col )
+        {
+            float dB = 0.0f;
+
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                float v = getTensor( tensor, xi, yi_local );
+
+                // ReLU derivative
+                if( i != NERF_COLOR_LAYER_END - 1 || i != NERF_DENSITY_LAYER_END - 1 )
+                {
+                    int yi = yi_global_base + yi_local;
+                    if( yi < arg.inputMat.m_row )
+                    {
+                        if( intermediates[elem( xi, yi, arg.m_Is[i+1] )] == 0.0f )
+                        {
+                            v = 0.0f;
+                        }
+                    }
+                }
+
+                // bias derivative
+                dB += v;
+
+                setTensor( tensor, xi, yi_local, v );
+            }
+            
+            if( 0.0f != dB )
+            {
+                atomicAdd( &dMatBuffer[ elem( xi, 0, arg.m_Bs[i] ) ], dB );
+            }
+        }
+        
+        __syncthreads();
+
+        if( xi < col )
+        {    
+            // Weight derivative
+            for( int yi_W = 0 ; yi_W < row ; yi_W++ )
+            {
+                float dW = 0.0f;
+                for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+                {
+                    int yi = yi_global_base + yi_local;
+                    if( yi < arg.inputMat.m_row )
+                    {
+                        float X = intermediates[elem( yi_W, yi, arg.m_Is[i] /* input Xs */ )];
+                        float Y = getTensor( tensor, xi, yi_local );
+                        dW = fma( X, Y, dW );
+                    }
+                }
+                if( dW != 0.0f )
+                {
+                    atomicAdd( &dMatBuffer[ elem( xi, yi_W, arg.m_Ws[i] ) ], dW );
+                } 
+            }
+        }
+
+        // X derivative
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            value[yi_local] = 0.0f;
+        }
+
+        if( xi < row )
+        {
+            for( int j = 0 ; j < col ; j++ ) 
+            {
+                float b = matBuffer[ elem( j, xi, arg.m_Ws[i] ) ];
+                for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+                {
+                    float a = getTensor( tensor, j, yi_local );
+                    value[yi_local] = fma( a, b, value[yi_local] );
+                }
+            }
+        }
+
+        __syncthreads();
+
+        if( xi < row )
+        {
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                setTensor( tensor, xi, yi_local, value[yi_local] );
+            }
+        }
+        __syncthreads();
+    }
+    
+    // encode backward
+    int level = xi / GRID_F;
+    int fdim  = xi % GRID_F;
+    int baseLevel = GRID_T * GRID_F * level;
+    float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
+    for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+    {
+        int yi = yi_global_base + yi_local;
+        if( arg.inputMat.m_row <= yi )
+        {
+            break;
+        }
+
+        float input[GRID_INPUT_DIM];
+        for( int x = 0 ; x < GRID_INPUT_DIM ; x++ )
+        {
+            input[x] = intermediates[elem( x, yi, arg.inputMat)];
+        }
+
+        if( level < GRID_L )
+        {
+            float derivative = getTensor( tensor, xi, yi_local );
+
+            HashGridEvaluator evaluator( GRID_INPUT_DIM );
+            while( evaluator.moveNext() )
+            {
+                float w;
+                uint32_t h;
+                evaluator.evaluate( &w, &h, res, input );
+                uint32_t index = h % GRID_T;
+                int address = baseLevel + GRID_T * fdim + index;
+                float wd =  w * derivative;
+                if ( wd != 0.0f )
+                {
+                    atomicAdd( &dMatBuffer[arg.gridFeatureLocation + address], wd );
+                }
+            }
+        }
     }
 }
