@@ -515,7 +515,7 @@ extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPF
     }
 }
 
-extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* intermediates, GPUMat* nerfSamples, GPUMat dirMat, int nElement ) 
+extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* intermediates, GPUMat* nerfSamples, GPUMat dirMat, int nElement, uint32_t scrubmleIndex ) 
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if( nElement <= x )
@@ -534,7 +534,8 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 	{
         int nSteps = 0;
         float dt = sqrt( 3.0f ) / MLP_STEP;
-        float bias = dt * 0.5f;
+        // float bias = dt * 0.5f;
+        float bias = dt * hash1( scrubmleIndex * 0xFFFF + x );
         for( int i = 0 ; i < MLP_STEP ; ++i )
         {
             float3 p = ro + rd * ( h.x + bias + dt * i );
@@ -1168,18 +1169,17 @@ extern "C" __global__ void nerfDerivative( NeRFRay *rays, NeRFOutput* refs, floa
         float coefficient = T * a;
         oColor2 += coefficient * c;
 
-        float scale = 128.0f;
         float3 dRGB = make_float3( nerfRgbActivationDrivativeY( c.x ), nerfRgbActivationDrivativeY( c.y ), nerfRgbActivationDrivativeY( c.z ) );
         float3 dOutput = dRGB * coefficient * dColor;
-        intermediates[elem( 0, yi, nerfSamples )] = scale * dOutput.x;
-        intermediates[elem( 1, yi, nerfSamples )] = scale * dOutput.y;
-        intermediates[elem( 2, yi, nerfSamples )] = scale * dOutput.z;
+        intermediates[elem( 0, yi, nerfSamples )] = dOutput.x;
+        intermediates[elem( 1, yi, nerfSamples )] = dOutput.y;
+        intermediates[elem( 2, yi, nerfSamples )] = dOutput.z;
 
         T *= ( 1.0f - a );
 
         float3 S = oColor - oColor2;
         float dSigma = dt * dot( T * c - S, dColor );
-        intermediates[elem( 3, yi, nerfSamples )] = scale * dSigma;
+        intermediates[elem( 3, yi, nerfSamples )] = dSigma;
 
         if( T < Teps )
         {

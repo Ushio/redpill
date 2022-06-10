@@ -49,6 +49,14 @@ namespace rpml
     {
         return div_round_up( val, divisor ) * divisor;
     }
+
+	DEVICE_INLINE float hash1( uint32_t n ) 
+	{
+		// integer hash copied from Hugo Elias
+		n = (n << 13U) ^ n;
+		n = n * (n * n * 15731U + 789221U) + 1376312589U;
+		return float( n & uint32_t(0x7fffffffU))/float(0x7fffffff);
+	}
     struct GPUMat
 	{
 		int m_row; // = inputs

@@ -708,6 +708,7 @@ namespace rpml
 					args.add( m_nerfSamplesBuffer->data() );
 					args.add( dirGPU );
 					args.add( nItems );
+					args.add( m_scrubmleIndexTrain++ );
 
 					int gridDim = div_round_up( nItems, 64 );
 					m_forwardShader->launch( "nerfRays", args, gridDim, 1, 1, 64, 1, 1, stream );
@@ -827,6 +828,7 @@ namespace rpml
 				args.add( m_nerfSamplesBuffer->data() );
 				args.add( dirGPU );
 				args.add( nElement );
+				args.add( 0 );
 
 				int gridDim = div_round_up( nElement, 64 );
 				m_forwardShader->launch( "nerfRays", args, gridDim, 1, 1, 64, 1, 1, stream );
@@ -866,7 +868,6 @@ namespace rpml
 				args.add( m_intermediateBuffer->data() );
 				args.add( outputGPU );
 				args.add( nElement );
-
 				// printf( "r %d\n", outputGPU.m_row );
 
 				int gridDim = div_round_up( nElement, 64 );
@@ -900,5 +901,6 @@ namespace rpml
 		std::vector<GPUMat> m_Is;
 
 		int m_iteration = 0;
+		int m_scrubmleIndexTrain = 0;
 	};
 }
