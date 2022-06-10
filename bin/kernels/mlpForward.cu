@@ -1179,7 +1179,7 @@ extern "C" __global__ void nerfDerivative( NeRFRay *rays, NeRFOutput* refs, floa
 
         float3 S = oColor - oColor2;
         float dSigma = dt * dot( T * c - S, dColor );
-        intermediates[elem( 3, yi, nerfSamples )] = dSigma;
+        intermediates[elem( 3, yi, nerfSamples )] = nerfDensityActivationDerivative( density ) * dSigma;
 
         if( T < Teps )
         {

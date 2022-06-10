@@ -11,6 +11,10 @@ typedef unsigned int uint32_t;
 #define INTRIN_COSF( x ) __cosf( x )
 #define INTRIN_POWF( x, y ) __powf( x, y )
 #define INTRIN_EXPF( x ) __expf( x )
+// #define INTRIN_SINF( x ) sinf( x )
+// #define INTRIN_COSF( x ) cosf( x )
+// #define INTRIN_POWF( x, y ) powf( x, y )
+// #define INTRIN_EXPF( x ) expf( x )
 
 #include "helper_math.h"
 
@@ -246,7 +250,7 @@ namespace rpml
 	const int NERF_DENSITY_LAYER_END = 2;
 	const int NERF_COLOR_LAYER_BEG = 2;
 	const int NERF_COLOR_LAYER_END = 5;
-	const int MLP_STEP = 64;
+	const int MLP_STEP = 1024;
 	struct NeRFInput
 	{
 		float ro[3]; float pad0;
@@ -409,6 +413,11 @@ namespace rpml
 	float nerfDensityActivation(float x)
 	{
 		return INTRIN_EXPF( x );
+	}
+	DEVICE_INLINE
+	float nerfDensityActivationDerivative( float x )
+	{
+		return INTRIN_EXPF( fclamp( x, -15.0f, 15.0f ) );
 	}
 	DEVICE_INLINE
 	float nerfRgbActivation( float x )
