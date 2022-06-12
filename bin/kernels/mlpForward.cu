@@ -553,7 +553,7 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
             p.y = fclamp( p.y, 0.0f, 1.0f );
             p.z = fclamp( p.z, 0.0f, 1.0f );
 
-            if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg, x) )
+            if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
             {
                 nEvals++;
             }
@@ -578,7 +578,7 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
             p.y = fclamp( p.y, 0.0f, 1.0f );
             p.z = fclamp( p.z, 0.0f, 1.0f );
             
-            if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg, x ) )
+            if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
             {
                 intermediates[elem( 0, eval_beg + i_sample, outputMat )] = p.x;
                 intermediates[elem( 1, eval_beg + i_sample, outputMat )] = p.y;
