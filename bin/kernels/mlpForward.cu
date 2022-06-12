@@ -1409,7 +1409,7 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
     __syncthreads();
 
     // backward
-    for( int i = arg.nLayer ; 0 <= i ; i-- )
+    for( int i = arg.nLayer - 1 ; 0 <= i ; i-- )
     {
         int row = arg.m_Ws[i].m_row; // input
         int col = arg.m_Ws[i].m_col; // output
