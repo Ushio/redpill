@@ -191,8 +191,8 @@ namespace rpml
 	};
 
 	const float ADAM_BETA1 = 0.9f;
-	const float ADAM_BETA2 = 0.999f;
-	const float ADAM_E = 10.0e-15f;
+	const float ADAM_BETA2 = 0.99f;
+	const float ADAM_E = 1.0e-15f;
 	struct Adam
 	{
 		float m_m;
