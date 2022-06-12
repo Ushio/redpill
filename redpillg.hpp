@@ -743,6 +743,7 @@ namespace rpml
 				{
 					arg.m_Is[i] = m_Is[i];
 				}
+				arg.nLayer = m_Ws.size();
 				arg.gridFeatureLocation = m_gridFeatureLocation;
 				{
 					ShaderArgument args;

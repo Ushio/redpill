@@ -312,8 +312,8 @@ namespace rpml
 		GPUMat m_Ws[16];
 		GPUMat m_Bs[16];
 		GPUMat m_Is[16];
+		int nLayer;
 		int gridFeatureLocation;
-		int padd0;
 		int padd1;
 		int padd2;
 	};
