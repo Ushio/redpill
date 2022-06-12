@@ -515,13 +515,15 @@ extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPF
     }
 }
 
-extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* intermediates, GPUMat* nerfSamples, GPUMat dirMat, int nElement, uint32_t scrubmleIndex ) 
+extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* intermediates, GPUMat* nerfSamples, GPUMat dirMat, int nElement, uint32_t scrubmleIndex, float* occupancyGrid, float* occupancyAverage ) 
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if( nElement <= x )
     {
         return;
     }
+
+    float avg = *occupancyAverage;
 
     float3 ro = make_float3( inputs[x].ro[0], inputs[x].ro[1], inputs[x].ro[2] );
     float3 rd = make_float3( inputs[x].rd[0], inputs[x].rd[1], inputs[x].rd[2] );
@@ -532,40 +534,60 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 
 	if( h.x /* min */ < h.y /* max */ )
 	{
+        const float eps = 0.00001f;
+
         int nSteps = 0;
+        int nEvals = 0;
         float dt = sqrt( 3.0f ) / MLP_STEP;
         // float bias = dt * 0.5f;
         float bias = dt * hash1( scrubmleIndex * 0xFFFF + x );
         for( int i = 0 ; i < MLP_STEP ; ++i )
         {
             float3 p = ro + rd * ( h.x + bias + dt * i );
-            const float eps = 0.00001f;
+            
             if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
             {
                 break;
             }
-            nSteps++;
-        }
-
-        int eval_beg = atomicAdd( &nerfSamples->m_row, nSteps );
-        int eval_end = eval_beg + nSteps;
-        rays[x].eval_beg = eval_beg;
-        rays[x].eval_end = eval_end;
-
-        for( int i = 0 ; i < nSteps ; ++i )
-        {
-            float3 p = ro + rd * ( h.x + bias + dt * i );
-
             p.x = fclamp( p.x, 0.0f, 1.0f );
             p.y = fclamp( p.y, 0.0f, 1.0f );
             p.z = fclamp( p.z, 0.0f, 1.0f );
 
-            intermediates[elem( 0, eval_beg + i, outputMat )] = p.x;
-            intermediates[elem( 1, eval_beg + i, outputMat )] = p.y;
-            intermediates[elem( 2, eval_beg + i, outputMat )] = p.z;
-            intermediates[elem( 0, eval_beg + i, dirMat )] = rd.x;
-            intermediates[elem( 1, eval_beg + i, dirMat )] = rd.y;
-            intermediates[elem( 2, eval_beg + i, dirMat )] = rd.z;
+            if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg, x) )
+            {
+                nEvals++;
+            }
+            nSteps++;
+        }
+
+        int eval_beg = atomicAdd( &nerfSamples->m_row, nEvals );
+        int eval_end = eval_beg + nEvals;
+        rays[x].eval_beg = eval_beg;
+        rays[x].eval_end = eval_end;
+
+        int i_sample = 0;
+        for( int i = 0 ; i < nSteps ; ++i )
+        {
+            float3 p = ro + rd * ( h.x + bias + dt * i );
+            
+            if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
+            {
+                break;
+            }
+            p.x = fclamp( p.x, 0.0f, 1.0f );
+            p.y = fclamp( p.y, 0.0f, 1.0f );
+            p.z = fclamp( p.z, 0.0f, 1.0f );
+            
+            if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg, x ) )
+            {
+                intermediates[elem( 0, eval_beg + i_sample, outputMat )] = p.x;
+                intermediates[elem( 1, eval_beg + i_sample, outputMat )] = p.y;
+                intermediates[elem( 2, eval_beg + i_sample, outputMat )] = p.z;
+                intermediates[elem( 0, eval_beg + i_sample, dirMat )] = rd.x;
+                intermediates[elem( 1, eval_beg + i_sample, dirMat )] = rd.y;
+                intermediates[elem( 2, eval_beg + i_sample, dirMat )] = rd.z;
+                i_sample++;
+            }
         }
     }
     else
@@ -850,6 +872,165 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
                 intermediates[ elem( xi, yi, arg.outputMat )] = value[yi_local];
             }
         }
+    }
+}
+extern "C" __global__ void nerfDecayOccupancy( float* occupancyGrid ) 
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    occupancyGrid[x] *= 0.95f;
+}
+extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg arg, float* occupancyGrid, float* occupancyAverage, int iteration ) 
+{
+    __shared__ float tensor[64 * SHARED_TENSOR_ROW];
+
+    int yi_global_base = blockIdx.x * SHARED_TENSOR_ROW;
+    int xi = threadIdx.y;
+    float value[SHARED_TENSOR_ROW];
+
+    if( xi < 3 )
+    {
+        float vs[SHARED_TENSOR_ROW];
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            int yi = yi_global_base + yi_local;
+
+            int hashbase = NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * 3 * iteration;
+            int index_z = yi / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES ); yi = yi % ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
+            int index_y = yi / NERF_OCCUPANCY_GRID_MIN_RES; yi = yi % NERF_OCCUPANCY_GRID_MIN_RES;
+            int index_x = yi;
+            float pz = ( index_z + hash1( hashbase + yi * 3 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES ) ;
+            float py = ( index_y + hash1( hashbase + yi * 3 + 1 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
+            float px = ( index_x + hash1( hashbase + yi * 3 + 2 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
+            float v;
+            if( xi == 0 )
+            {
+                v = px;
+            }
+            else if( xi == 1 )
+            {
+                v = py;
+            }
+            else
+            {
+                v = pz;
+            }
+            vs[yi_local] = v;
+        }
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            setTensor( tensor, xi, yi_local, vs[yi_local] );
+        }
+    }
+    __syncthreads();
+
+    {
+        int level = xi / GRID_F;
+        int fdim  = xi % GRID_F;
+        int baseLevel = GRID_T * GRID_F * level;
+        float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            float input[GRID_INPUT_DIM];
+            for( int x = 0 ; x < GRID_INPUT_DIM ; x++ )
+            {
+                input[x] = getTensor( tensor, x, yi_local );
+            }
+            __syncthreads();
+
+            if( level < GRID_L )
+            {
+                HashGridEvaluator evaluator( GRID_INPUT_DIM );
+                float feature = 0.0f;
+                while( evaluator.moveNext() )
+                {
+                    float w;
+                    uint32_t h;
+                    evaluator.evaluate( &w, &h, res, input );
+                    uint32_t index = h % GRID_T;
+                    int address = baseLevel + GRID_T * fdim + index;
+                    float f = matBuffer[arg.gridFeatureLocation + address];
+                    feature += w * f;
+                }
+                setTensor( tensor, xi, yi_local, feature );
+            }
+        }
+        __syncthreads();
+    }
+    
+    for( int i = NERF_DENSITY_LAYER_BEG ; i < NERF_DENSITY_LAYER_END ; i++ )
+    {
+        int row = arg.m_Ws[i].m_row; // input
+        int col = arg.m_Ws[i].m_col; // output
+
+        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            value[yi_local] = bias;
+        }
+        
+        if( xi < col )
+        {
+            for( int j = 0 ; j < row ; j++ ) 
+            {
+                float b = matBuffer[ elem( xi /* output xi */, j, arg.m_Ws[i] ) ];
+                for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+                {
+                    float a = getTensor( tensor, j, yi_local );
+                    value[yi_local] = fma( a, b, value[yi_local] );
+                }
+            }
+            
+            float lowerbounds = i + 1 != NERF_DENSITY_LAYER_END ? 0.0f : -3.40282e+38f;
+            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+            {
+                value[yi_local] = fmaxf( value[yi_local], lowerbounds );
+            }
+        }
+
+        __syncthreads();
+    }
+
+    if( xi == 0 )
+    {
+        float avgSum = 0.0f;
+        for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
+        {
+            float density = nerfDensityActivation( getTensor( tensor, 0, yi_local ) );
+            avgSum += density / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
+
+            int yi = yi_global_base + yi_local;
+
+            int hashbase = NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * 3 * iteration;
+            int index_z = yi / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES ); yi = yi % ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
+            int index_y = yi / NERF_OCCUPANCY_GRID_MIN_RES; yi = yi % NERF_OCCUPANCY_GRID_MIN_RES;
+            int index_x = yi;
+            float pz = ( index_z + hash1( hashbase + yi * 3 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES ) ;
+            float py = ( index_y + hash1( hashbase + yi * 3 + 1 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
+            float px = ( index_x + hash1( hashbase + yi * 3 + 2 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
+            
+            // if( (yi % 85 ) == 0 )
+            // {
+            //     printf("d [%d] %d, %d, %d - %f\n", yi_global_base + yi_local, index_x, index_y, index_z, density);
+            // }
+            
+            int res = NERF_OCCUPANCY_GRID_MIN_RES;
+            for( int lv = 0 ; lv < NERF_OCCUPANCY_GRID_L ; lv++ )
+            {
+                /// DimensionHasher hasher;
+                // hasher.add( px * res, 0 );
+                // hasher.add( py * res, 1 );
+                // hasher.add( pz * res, 2 );
+                SequencialHasher hasher;
+                hasher.add( index_x, NERF_OCCUPANCY_GRID_MIN_RES );
+                hasher.add( index_y, NERF_OCCUPANCY_GRID_MIN_RES );
+                hasher.add( index_z, NERF_OCCUPANCY_GRID_MIN_RES );
+                res *= 2;
+
+                uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
+                atomicMax( (uint32_t*)&occupancyGrid[NERF_OCCUPANCY_GRID_T * lv + index], __float_as_uint( density ) );
+            }
+        }
+        atomicAdd( occupancyAverage, avgSum );
     }
 }
 
@@ -1187,6 +1368,7 @@ extern "C" __global__ void nerfDerivative( NeRFRay *rays, NeRFOutput* refs, floa
             break;
         }
     }
+	// printf( "nSkip %d / %d\n", eval_end - tail_yi, eval_end - eval_beg );
     for( int yi = tail_yi; yi < eval_end; yi++ )
     {
         for( int i = 0 ; i < 4; i++ )

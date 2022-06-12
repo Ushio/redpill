@@ -1537,6 +1537,15 @@ namespace rpml
 				m_grid[i] *= s;
 			}
 		}
+		void mean()
+		{
+			float m = 0;
+			for( int i = 0; i < m_grid.size(); ++i )
+			{
+				m += m_grid[i];
+			}
+			m_mean = m / m_grid.size();
+		}
 		void update( float density, int x, int y, int z )
 		{
 			int index = x + OC_BASE_SIZE * y + OC_BASE_SIZE * OC_BASE_SIZE * z;
@@ -1549,9 +1558,12 @@ namespace rpml
 			int zi = clampss( z, 0.0f, 0.999999f ) * OC_BASE_SIZE;
 			int index = xi + OC_BASE_SIZE * yi + OC_BASE_SIZE * OC_BASE_SIZE * zi;
 
-			return OC_MIN_DENSITY < m_grid[index];
+			return m_mean < m_grid[index];
+			// return 5.912f < m_grid[index];
+			//return OC_MIN_DENSITY < m_grid[index];
 		}
 		std::vector<float> m_grid;
+		float m_mean = 0.0f;
 	};
 
 	class NeRF
@@ -1714,6 +1726,8 @@ namespace rpml
 			{
 				m_pool.processTask();
 			}
+
+			m_occupancyGrid.mean();
 		}
 		float train( const NeRFInput* inputs, const NeRFOutput* outputs, int nElement )
 		{
@@ -1777,6 +1791,7 @@ namespace rpml
 					if( m_hasOc && m_occupancyGrid.occupied( x, y, z ) == false )
 					{
 						nSkipEval++;
+						nSteps++;
 						continue;
 					}
 
@@ -2047,6 +2062,7 @@ namespace rpml
 					// skip
 					if( m_hasOc && m_occupancyGrid.occupied( x, y, z ) == false )
 					{
+						nSteps++;
 						continue;
 					}
 

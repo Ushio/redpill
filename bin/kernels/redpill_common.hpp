@@ -124,7 +124,22 @@ namespace rpml
 	private:
 		uint32_t m_h = 0;
 	};
+	class SequencialHasher
+	{
+	public:
+		DEVICE
+		void add( uint32_t xs, uint32_t resolution )
+		{
+			m_h += m_base * xs;
+			m_base *= resolution;
+		}
+		DEVICE
+		uint32_t value() const { return m_h; }
 
+	private:
+		uint32_t m_base = 1;
+		uint32_t m_h = 0;
+	};
 	class HashGridEvaluator
 	{
 	public:
@@ -251,6 +266,12 @@ namespace rpml
 	const int NERF_COLOR_LAYER_BEG = 2;
 	const int NERF_COLOR_LAYER_END = 5;
 	const int MLP_STEP = 1024;
+
+	const int NERF_OCCUPANCY_GRID_MIN_RES = 128;
+	const int NERF_OCCUPANCY_GRID_T = NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES;
+	const int NERF_OCCUPANCY_GRID_L = 1;
+	
+
 	struct NeRFInput
 	{
 		float ro[3]; float pad0;
@@ -430,4 +451,47 @@ namespace rpml
 		return Y * ( 1.0f - Y );
 	}
 #endif
+
+	DEVICE_INLINE
+	bool isOccupied( float px, float py, float pz, float dt, float* occupancyGrid, float avg, int gi )
+	{
+		int res = NERF_OCCUPANCY_GRID_MIN_RES;
+		int lv = 0;
+		for( int l = 0 ; l < NERF_OCCUPANCY_GRID_L ; l++ )
+		{
+			if( dt < ( 1.0f / ( res * 2 ) ) * sqrt( 3.0f ) )
+			{
+				res *= 2;
+				continue;
+			}
+			lv = l;
+			break;
+		}
+		// DimensionHasher hasher;
+		// hasher.add( px * res, 0 );
+		// hasher.add( py * res, 1 );
+		// hasher.add( pz * res, 2 );
+		SequencialHasher hasher;
+		hasher.add( px * NERF_OCCUPANCY_GRID_MIN_RES, NERF_OCCUPANCY_GRID_MIN_RES );
+		hasher.add( py * NERF_OCCUPANCY_GRID_MIN_RES, NERF_OCCUPANCY_GRID_MIN_RES );
+		hasher.add( pz * NERF_OCCUPANCY_GRID_MIN_RES, NERF_OCCUPANCY_GRID_MIN_RES );
+
+		// const float ocMinA = 0.001f;
+		// const float minDensity = - log( 1.0f - ocMinA ) / dt;
+
+		// const float minDensity = 5.91206675650176782857f; // 1024.0f / ( sqrt(3.0f) * 100.0f )
+		// const float minDensity = 0.7f;
+		uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
+		// printf("s %d %d\n", lv, NERF_OCCUPANCY_GRID_L * NERF_OCCUPANCY_GRID_T - NERF_OCCUPANCY_GRID_T * lv + index);
+		// float a = 1.0f - INTRIN_EXPF( -de * dt );
+		//if( minDensity < occupancyGrid[NERF_OCCUPANCY_GRID_T * lv + index] == false )
+		
+		// if( (gi % 256 ) == 0)
+		// {
+		// 	printf("d %f %f\n", minDensity, occupancyGrid[NERF_OCCUPANCY_GRID_T * lv + index]);
+		// }
+		// printf("minDensity %f %f a = %f\n", minDensity, occupancyGrid[NERF_OCCUPANCY_GRID_T * lv + index], a);
+		return avg < occupancyGrid[NERF_OCCUPANCY_GRID_T * lv + index];
+		// return true;
+	}
 }

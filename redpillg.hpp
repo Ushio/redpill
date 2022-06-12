@@ -593,6 +593,9 @@ namespace rpml
 
 			m_nerfSamplesBuffer = std::unique_ptr<Buffer>( new Buffer( sizeof( GPUMat ) ) );
 
+			m_occupancyBuffer = std::unique_ptr<Buffer>( new Buffer( NERF_OCCUPANCY_GRID_T * sizeof( float ) * NERF_OCCUPANCY_GRID_L ) );
+			oroMemsetD32( (oroDeviceptr)m_occupancyBuffer->data(), as_int32( 65536.0f ), m_occupancyBuffer->bytes() / sizeof( int ) );
+			m_occupancyAvgBuffer = std::unique_ptr<Buffer>( new Buffer( sizeof( float ) ) );
 			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release ) );
 		}
 		void takeReference( const NeRF& nerf )
@@ -709,6 +712,8 @@ namespace rpml
 					args.add( dirGPU );
 					args.add( nItems );
 					args.add( m_scrubmleIndexTrain++ );
+					args.add( m_occupancyBuffer->data() );
+					args.add( m_occupancyAvgBuffer->data() );
 
 					int gridDim = div_round_up( nItems, 64 );
 					m_forwardShader->launch( "nerfRays", args, gridDim, 1, 1, 64, 1, 1, stream );
@@ -771,8 +776,9 @@ namespace rpml
 				}
 			}
 
+			m_iteration++;
+
 			{
-				m_iteration++;
 				float beta1t = pow( ADAM_BETA1, m_iteration );
 				float beta2t = pow( ADAM_BETA2, m_iteration );
 				int nAdam = m_adamBuffer->bytes() / sizeof( Adam );
@@ -788,6 +794,41 @@ namespace rpml
 
 				m_forwardShader->launch( "adamOptimize", adamArgs, div_round_up( nAdam, 64 ), 1, 1, 64, 1, 1, stream );
 			}
+
+			if( ( m_iteration % 16 ) == 0 )
+			{
+				oroMemsetD32( (oroDeviceptr)m_occupancyAvgBuffer->data(), 0, 1 );
+
+				if( m_iteration == 16 )
+				{
+					oroMemsetD32( (oroDeviceptr)m_occupancyBuffer->data(), as_int32( 0.0f ), m_occupancyBuffer->bytes() / sizeof( int ) );
+				}
+				else
+				{
+					ShaderArgument dargs;
+					dargs.add( m_occupancyBuffer->data() );
+					m_forwardShader->launch( "nerfDecayOccupancy", dargs, div_round_up( NERF_OCCUPANCY_GRID_T, 64 ), 1, 1, 64, 1, 1, stream );
+				}
+				
+
+				NeRFForwardArg arg;
+				for( int i = 0; i < m_Ws.size(); ++i )
+				{
+					arg.m_Ws[i] = m_Ws[i];
+					arg.m_Bs[i] = m_Bs[i];
+				}
+				arg.gridFeatureLocation = m_gridFeatureLocation;
+
+				ShaderArgument args;
+				args.add( m_matBuffer->data() );
+				args.add( arg );
+				args.add( m_occupancyBuffer->data() );
+				args.add( m_occupancyAvgBuffer->data() );
+				args.add( m_iteration / 16 );
+				int gridDim = div_round_up( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES, SHARED_TENSOR_ROW );
+				m_forwardShader->launch( "nerfUpdateOccupancy", args, gridDim, 1, 1, 1, 64, 1, stream );
+			}
+
 			oroError e = oroStreamSynchronize( stream );
 			return 0.0f;
 		}
@@ -829,6 +870,8 @@ namespace rpml
 				args.add( dirGPU );
 				args.add( nElement );
 				args.add( 0 );
+				args.add( m_occupancyBuffer->data() );
+				args.add( m_occupancyAvgBuffer->data() );
 
 				int gridDim = div_round_up( nElement, 64 );
 				m_forwardShader->launch( "nerfRays", args, gridDim, 1, 1, 64, 1, 1, stream );
@@ -893,6 +936,9 @@ namespace rpml
 		std::unique_ptr<Buffer> m_nerfOutputBuffer;
 		std::unique_ptr<Buffer> m_rayBuffer;
 		std::unique_ptr<Buffer> m_nerfSamplesBuffer;
+
+		std::unique_ptr<Buffer> m_occupancyBuffer;
+		std::unique_ptr<Buffer> m_occupancyAvgBuffer;
 
 		// learning
 		std::unique_ptr<Buffer> m_intermediateBuffer;
