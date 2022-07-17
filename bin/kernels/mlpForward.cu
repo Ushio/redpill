@@ -1025,7 +1025,25 @@ extern "C" __global__ void avg( float* occupancyGrid, float* occupancyAverage )
 {
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	float density = occupancyGrid[x] / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
-	atomicAdd( occupancyAverage, density );
+
+    __shared__ float localAvg;
+
+    if( threadIdx.x == 0 )
+	{
+		localAvg = 0.0f;
+    }
+    
+    __syncthreads();
+
+	atomicAdd( &localAvg, density );
+
+    __syncthreads();
+
+    if( threadIdx.x == 0 )
+	{
+		atomicAdd( occupancyAverage, localAvg );
+	}
+	// atomicAdd( occupancyAverage, density );
 }
 extern "C" __global__ void nerfEval( NeRFRay *rays, NeRFOutput* outputs, float* intermediates, GPUMat nerfSamples, int nElement ) 
 {
