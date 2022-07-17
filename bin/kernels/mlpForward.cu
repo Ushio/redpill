@@ -1235,6 +1235,20 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
     }
     __syncthreads(); 
 
+    // sh - store intermediates
+	if( 16 <= xi && xi < 32 )
+	{
+		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			int yi = yi_global_base + yi_local;
+			if( yi < arg.inputMat.m_row )
+			{
+				float sh = getTensor( tensor, xi, yi_local );
+				intermediates[elem( xi, yi, arg.m_Is[NERF_DENSITY_LAYER_END] )] = sh;
+			}
+		}
+    }
+
     for( int i = NERF_COLOR_LAYER_BEG ; i < NERF_COLOR_LAYER_END ; i++ )
     {
         int row = arg.m_Ws[i].m_row; // input
@@ -1323,6 +1337,10 @@ extern "C" __global__ void nerfDerivative( NeRFRay *rays, NeRFOutput* refs, floa
     {
         float density = intermediates[elem( 3, yi, nerfSamples )];
         float sigma = nerfDensityActivation( density );
+  //      if( ( x % 449 ) == 0 )
+		//{
+		//	printf( "density %f\n", sigma );
+		//}
 
         float3 c = make_float3(
             nerfRgbActivation( intermediates[elem( 0, yi, nerfSamples )] ),
@@ -1490,6 +1508,11 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
 
         if( xi < col )
         {    
+   //         if( i == 2 )
+			//{
+			//	printf( "rc %d %d, %d %d\n", row, col, arg.m_Is[i].m_row, arg.m_Is[i].m_col );
+   //         }
+
             // Weight derivative
             for( int yi_W = 0 ; yi_W < row ; yi_W++ )
             {

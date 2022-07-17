@@ -692,6 +692,14 @@ namespace rpml
 				for( int i = 0; i < m_Ws.size(); ++i )
 				{
 					int outputs = m_Ws[i].m_col;
+
+					if( i + 1 == NERF_DENSITY_LAYER_END )
+					{
+						// don't forget.
+						// concat directional encoding.
+						outputs += 16; 
+					}
+					// printf( "outputs [%d] %d\n", i, outputs );
 					GPUMat I = allocateGPUMat( &location, maxRow, outputs );
 					m_Is.push_back( I );
 				}

@@ -94,6 +94,14 @@ namespace rpml
 
 	DEVICE_INLINE int elem( int x, int y, GPUMat mat )
 	{
+		//if( mat.m_col <= x )
+		//{
+		//	printf( "invalid: col=%d x=%d\n", mat.m_col, x );
+		//}
+		//if( mat.m_paddedRow <= y )
+		//{
+		//	printf( "invalid: row=%d y=%d\n", mat.m_paddedRow, y );
+		//}
 		return mat.m_location + mat.m_paddedRow * x + y;
 	}
 
