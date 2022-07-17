@@ -1448,12 +1448,14 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
         {
             float dB = 0.0f;
 
+            // ReLU derivative
+			bool noActivation = ( i == NERF_COLOR_LAYER_END - 1 ) || ( i == NERF_DENSITY_LAYER_END - 1 );
+			bool activation = !noActivation;
             for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
             {
                 float v = getTensor( tensor, xi, yi_local );
 
-                // ReLU derivative
-                if( i != NERF_COLOR_LAYER_END - 1 || i != NERF_DENSITY_LAYER_END - 1 )
+				if( activation )
                 {
                     int yi = yi_global_base + yi_local;
                     if( yi < arg.inputMat.m_row )
@@ -1463,12 +1465,19 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
                             v = 0.0f;
                         }
                     }
+					else
+					{
+						v = 0.0f;
+                    }
                 }
 
                 // bias derivative
                 dB += v;
 
-                setTensor( tensor, xi, yi_local, v );
+                if( activation )
+				{
+					setTensor( tensor, xi, yi_local, v );
+				}
             }
             
             if( 0.0f != dB )
