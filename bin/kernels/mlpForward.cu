@@ -731,7 +731,11 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
         int row = arg.m_Ws[i].m_row; // input
         int col = arg.m_Ws[i].m_col; // output
 
+#if ENABLE_NERF_BIAS
         float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
+#else
+		const float bias = 0.0f;
+#endif
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             value[yi_local] = bias;
@@ -819,7 +823,11 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
         int row = arg.m_Ws[i].m_row; // input
         int col = arg.m_Ws[i].m_col; // output
 
-        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
+#if ENABLE_NERF_BIAS
+		float bias = xi < col ? matBuffer[elem( xi, 0, arg.m_Bs[i] )] : 0.0f;
+#else
+		const float bias = 0.0f;
+#endif
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             value[yi_local] = bias;
@@ -962,7 +970,11 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
         int row = arg.m_Ws[i].m_row; // input
         int col = arg.m_Ws[i].m_col; // output
 
-        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
+#if ENABLE_NERF_BIAS
+		float bias = xi < col ? matBuffer[elem( xi, 0, arg.m_Bs[i] )] : 0.0f;
+#else
+		const float bias = 0.0f;
+#endif
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             value[yi_local] = bias;
@@ -1170,7 +1182,11 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
         int row = arg.m_Ws[i].m_row; // input
         int col = arg.m_Ws[i].m_col; // output
 
-        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
+#if ENABLE_NERF_BIAS
+		float bias = xi < col ? matBuffer[elem( xi, 0, arg.m_Bs[i] )] : 0.0f;
+#else
+		const float bias = 0.0f;
+#endif
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             value[yi_local] = bias;
@@ -1264,7 +1280,11 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
         int row = arg.m_Ws[i].m_row; // input
         int col = arg.m_Ws[i].m_col; // output
 
-        float bias = xi < col ? matBuffer[ elem( xi, 0, arg.m_Bs[i] ) ] : 0.0f;
+#if ENABLE_NERF_BIAS
+		float bias = xi < col ? matBuffer[elem( xi, 0, arg.m_Bs[i] )] : 0.0f;
+#else
+		const float bias = 0.0f;
+#endif
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             value[yi_local] = bias;
@@ -1493,7 +1513,6 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
 						v = 0.0f;
                     }
                 }
-
                 // bias derivative
                 dB += v;
 
@@ -1502,11 +1521,12 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
 					setTensor( tensor, xi, yi_local, v );
 				}
             }
-            
+#if ENABLE_NERF_BIAS
             if( 0.0f != dB )
             {
                 atomicAdd( &dMatBuffer[ elem( xi, 0, arg.m_Bs[i] ) ], dB );
             }
+#endif
         }
         
         __syncthreads();

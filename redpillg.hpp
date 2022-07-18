@@ -792,6 +792,7 @@ namespace rpml
 				float beta1t = pow( ADAM_BETA1, m_iteration );
 				float beta2t = pow( ADAM_BETA2, m_iteration );
 				int nAdam = m_adamBuffer->bytes() / sizeof( Adam );
+				// printf( "beta1t, beta2t %f, %f\n", beta1t, beta2t );
 
 				ShaderArgument adamArgs;
 				adamArgs.add( m_matBuffer->data() );
@@ -846,6 +847,10 @@ namespace rpml
 					int gridDim = div_round_up( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES, 32 );
 					m_forwardShader->launch( "avg", args, gridDim, 1, 1, 32, 1, 1, stream );
 				}
+
+				//float avg = 0.0f;
+				//oroMemcpyDtoH( &avg, (oroDeviceptr)m_occupancyAvgBuffer->data(), 4 );
+				//printf( " --avg: %f\n", avg );
 			}
 
 			oroError e = oroStreamSynchronize( stream );
@@ -885,7 +890,7 @@ namespace rpml
 				{
 					m_intermediateBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 				}
-				printf( "location * sizeof( float ) %d\n", location * sizeof( float ) );
+				//printf( "location * sizeof( float ) %d\n", location * sizeof( float ) );
 
 				inputGPU.m_row = 0;
 				oroMemcpyHtoDAsync( (oroDeviceptr)m_nerfSamplesBuffer->data(), &inputGPU, sizeof( GPUMat ), stream );			

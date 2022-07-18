@@ -33,6 +33,8 @@ typedef unsigned int uint32_t;
 
 #define SHARED_TENSOR_ROW 16
 
+#define ENABLE_NERF_BIAS 0
+
 namespace rpml
 {
 	const int GPU_MAT_ALIGNMENT = 8;
