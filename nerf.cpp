@@ -14,6 +14,8 @@ using namespace rpml;
 
 #include <json.hpp>
 
+#define LINEAR_SPACE_LEARNING 0
+
 struct NerfCamera
 {
 	glm::mat4 transform;
@@ -232,7 +234,7 @@ int main()
 		const int n_rays_per_batch = 4096;
 
 		static int iterations = 0; 
-		// if( iterations++ < 8 )
+		// if( iterations++ < 256 )
 		for(int k = 0 ; k < 1 ; ++k)
 		{
 			inputs.clear();
@@ -290,9 +292,15 @@ int main()
 
 					glm::uvec4 color = nc.image( x, y );
 					NeRFOutput output = {};
+#if LINEAR_SPACE_LEARNING
 					output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
 					output.color[1] = std::pow( (float)color.y / 255.0f, 2.2f );
 					output.color[2] = std::pow( (float)color.z / 255.0f, 2.2f );
+#else
+					output.color[0] = (float)color.x / 255.0f;
+					output.color[1] = (float)color.y / 255.0f;
+					output.color[2] = (float)color.z / 255.0f;
+#endif
 					output.color[3] = (float)color.z / 255.0f;
 					// printf( "%f %f %f\n", output.color[0], output.color[1], output.color[2] );
 					refs.push_back( output );
@@ -381,9 +389,16 @@ int main()
 				if( h.x /* min */ < h.y /* max */ )
 				{
 					NeRFOutput o = nerf_out[it++];
+#if LINEAR_SPACE_LEARNING
 					float r = glm::clamp( pow( o.color[0], 0.454545f ), 0.0f, 1.0f );
 					float g = glm::clamp( pow( o.color[1], 0.454545f ), 0.0f, 1.0f );
 					float b = glm::clamp( pow( o.color[2], 0.454545f ), 0.0f, 1.0f );
+#else
+					float r = glm::clamp( o.color[0], 0.0f, 1.0f );
+					float g = glm::clamp( o.color[1], 0.0f, 1.0f );
+					float b = glm::clamp( o.color[2], 0.0f, 1.0f );
+
+#endif
 					glm::u8vec4 color;
 					color.r = r * 255.0f;
 					color.g = g * 255.0f;
