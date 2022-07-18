@@ -988,6 +988,14 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
         }
 
         __syncthreads();
+
+        if( xi < col )
+		{
+			for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+			{
+				setTensor( tensor, xi, yi_local, value[yi_local] );
+			}
+		}
     }
 
     if( xi == 0 )
