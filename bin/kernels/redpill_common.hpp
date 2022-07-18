@@ -210,8 +210,10 @@ namespace rpml
 		float optimize( float value, float g, float alpha, float beta1t, float beta2t )
 		{
 			float s = alpha;
-			float m = m_m = ADAM_BETA1 * m_m + ( 1.0f - ADAM_BETA1 ) * g;
-			float v = m_v = ADAM_BETA2 * m_v + ( 1.0f - ADAM_BETA2 ) * g * g;
+			float m = ADAM_BETA1 * m_m + ( 1.0f - ADAM_BETA1 ) * g;
+			float v = ADAM_BETA2 * m_v + ( 1.0f - ADAM_BETA2 ) * g * g;
+			m_m = m;
+			m_v = v;
 			float m_hat = m / ( 1.0f - beta1t );
 			float v_hat = v / ( 1.0f - beta2t );
 			return value - s * m_hat / ( sqrt( v_hat ) + ADAM_E );

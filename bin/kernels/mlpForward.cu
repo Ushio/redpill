@@ -1254,7 +1254,6 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
 			if( yi < arg.inputMat.m_row )
 			{
 				float sh = getTensor( tensor, xi, yi_local );
-				// printf( "[%d] sh %f\n", xi, sh );
 				intermediates[elem( xi, yi, arg.m_Is[NERF_COLOR_LAYER_BEG] )] = sh;
 			}
 		}
@@ -1348,10 +1347,6 @@ extern "C" __global__ void nerfDerivative( NeRFRay *rays, NeRFOutput* refs, floa
     {
         float density = intermediates[elem( 3, yi, nerfSamples )];
         float sigma = nerfDensityActivation( density );
-        //if( ( x % 117 ) == 0 )
-        //{
-        //    printf( "density %f\n", sigma );
-        //}
 
         float3 c = make_float3(
             nerfRgbActivation( intermediates[elem( 0, yi, nerfSamples )] ),
@@ -1402,18 +1397,12 @@ extern "C" __global__ void nerfDerivative( NeRFRay *rays, NeRFOutput* refs, floa
         float dSigma = dt * dot( T * c - S, dColor );
         intermediates[elem( 3, yi, nerfSamples )] = nerfDensityActivationDerivative( density ) * dSigma;
 
-  //      if( ( x % 117 ) == 0 )
-		//{
-		//	printf( "density %f / %f ~ %f\n", intermediates[elem( 3, yi, nerfSamples )] , sigma, density );
-		//}
-
         if( T < Teps )
         {
             tail_yi = yi + 1;
             break;
         }
     }
-	// printf( "nSkip %d / %d\n", eval_end - tail_yi, eval_end - eval_beg );
     for( int yi = tail_yi; yi < eval_end; yi++ )
     {
         for( int i = 0 ; i < 4; i++ )
@@ -1470,10 +1459,6 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
                     int yi = yi_global_base + yi_local;
                     if( yi < arg.outputMat.m_row )
                     {
-						//if( ( yi % 117 ) == 0 )
-						//{
-						//	printf( "concat %f %f\n", v, intermediates[elem( 3, yi, arg.outputMat )] );
-						//}
                         v += intermediates[elem( 3, yi, arg.outputMat )];
                     }
                     setTensor( tensor, xi, yi_local, v );
