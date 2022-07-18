@@ -416,6 +416,38 @@ int main()
 		}
 		bg->upload( image );
 
+#if 0
+		float step = 2.0f / NERF_OCCUPANCY_GRID_MIN_RES;
+		PrimBegin( pr::PrimitiveMode::Points, 4 );
+		if( !nerfg.m_grid.empty() )
+		for( int i = 0; i < nerfg.m_grid.size() ; i++ )
+		{
+			int yi = i;
+		    int index_z = yi / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
+			yi = yi % ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
+			int index_y = yi / NERF_OCCUPANCY_GRID_MIN_RES;
+			yi = yi % NERF_OCCUPANCY_GRID_MIN_RES;
+			int index_x = yi;
+
+			//if( ( i % 127 ) == 0 )
+			//{
+			//	printf( "den %f\n", nerfg.m_grid[i] );
+			//	 printf("d %f %f %f\n", mlp, optical_thickness, MIN_CONE_STEPSIZE(), scalbnf(MIN_CONE_STEPSIZE(), level) );
+			//}
+
+			if( nerfg.m_avg < nerfg.m_grid[i] )
+			{
+				glm::vec3 p = {
+					-1.0f + step * index_x + step * 0.5f,
+					-1.0f + step * index_y + step * 0.5f,
+					-1.0f + step * index_z + step * 0.5f
+				};
+				int c = minss( nerfg.m_grid[yi] * 255, 255 );
+				PrimVertex( p, { c, c, c } );
+			}
+		}
+		PrimEnd();
+#endif
 		//static int iterations = 0;
 		//if( iterations++ > 32 )
 		//{
