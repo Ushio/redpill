@@ -158,7 +158,7 @@ int main()
 		//}
 	}
 
-	bool isCPUEval = false;
+	bool isLearning = true;
 
 	//std::string error;
 	//std::shared_ptr<FScene> scene = ReadWavefrontObj( GetDataPath( "nerf/Bulldozer.obj" ), error );
@@ -234,6 +234,8 @@ int main()
 		const int n_rays_per_batch = 4096;
 
 		static int iterations = 0; 
+
+		if( isLearning )
 		for(int k = 0 ; k < 16 ; ++k)
 		{
 			iterations++;
@@ -364,11 +366,11 @@ int main()
 
 		nerf_out.resize( nerf_in.size() );
 
-		if( isCPUEval )
-		{
-			nerf.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
-		}
-		else
+		//if( isCPUEval )
+		//{
+		//	nerf.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
+		//}
+		//else
 		{
 			//nerfg.takeReference( nerf );
 			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
@@ -579,13 +581,8 @@ int main()
 		ImGui::Begin( "Panel" );
 		ImGui::Text( "loss %.6f", loss / inputs.size() );
 
-		
 		ImGui::Text( "iterations %d", iterations );
-		//ImGui::InputFloat( "globalscale", &globalscale, 0.0001f );
-		//ImGui::InputFloat( "globallocation.x", &globallocation.x, 0.001f );
-		//ImGui::InputFloat( "globallocation.y", &globallocation.y, 0.001f );
-		//ImGui::InputFloat( "globallocation.z", &globallocation.z, 0.001f );
-		ImGui::Checkbox( "isCPUEval", &isCPUEval );
+		ImGui::Checkbox( "isLearning", &isLearning );
 
 		static int index = 0;
 		if( ImGui::InputInt( "index", &index ) )
