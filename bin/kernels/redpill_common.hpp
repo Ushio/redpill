@@ -35,6 +35,8 @@ typedef unsigned int uint32_t;
 
 #define ENABLE_NERF_BIAS 0
 
+#define NERF_AVG_BATCH 128
+
 namespace rpml
 {
 	const int GPU_MAT_ALIGNMENT = 8;

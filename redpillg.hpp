@@ -844,7 +844,7 @@ namespace rpml
 					ShaderArgument args;
 					args.add( m_occupancyBuffer->data() );
 					args.add( m_occupancyAvgBuffer->data() );
-					int gridDim = div_round_up( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES, 32 );
+					int gridDim = div_round_up( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES, 32 * NERF_AVG_BATCH );
 					m_forwardShader->launch( "avg", args, gridDim, 1, 1, 32, 1, 1, stream );
 				}
 

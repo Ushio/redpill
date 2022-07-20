@@ -234,9 +234,10 @@ int main()
 		const int n_rays_per_batch = 4096;
 
 		static int iterations = 0; 
-		// if( iterations++ < 256 )
-		for(int k = 0 ; k < 1 ; ++k)
+		for(int k = 0 ; k < 16 ; ++k)
 		{
+			iterations++;
+
 			inputs.clear();
 			refs.clear();
 
@@ -306,11 +307,11 @@ int main()
 					refs.push_back( output );
 				}
 			}
-			printf( "input: %d\n", (int)inputs.size() );
+			//printf( "input: %d\n", (int)inputs.size() );
 			Stopwatch sw;
 			nerfg.train( inputs.data(), refs.data(), inputs.size(), stream );
 			//loss = nerf.train( inputs.data(), refs.data(), inputs.size() );
-			printf( "loss %f, t = %f\n", loss / inputs.size(), sw.elapsed() );
+			//printf( "loss %f, t = %f\n", loss / inputs.size(), sw.elapsed() );
 		}
 
 		static std::vector<NeRFInput> nerf_in;
@@ -578,8 +579,8 @@ int main()
 		ImGui::Begin( "Panel" );
 		ImGui::Text( "loss %.6f", loss / inputs.size() );
 
-		static int itr = 0;
-		ImGui::Text( "itr %d", itr++ );
+		
+		ImGui::Text( "iterations %d", iterations );
 		//ImGui::InputFloat( "globalscale", &globalscale, 0.0001f );
 		//ImGui::InputFloat( "globallocation.x", &globallocation.x, 0.001f );
 		//ImGui::InputFloat( "globallocation.y", &globallocation.y, 0.001f );
