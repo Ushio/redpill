@@ -202,6 +202,20 @@ namespace rpml
 		uint32_t m_bits;
 	};
 
+	// batch sequencial load
+	DEVICE
+	float BSL4( float* matBuffer, int x, int y, GPUMat m, float vals[4] )
+	{
+		if( ( y % 4 ) == 0 )
+		{
+			for( int i = 0; i < 4; i++ )
+			{
+				vals[i] = matBuffer[elem( x, y + i, m )];
+			}
+		}
+		return vals[y % 4];
+	}
+
 	const float ADAM_BETA1 = 0.9f;
 	const float ADAM_BETA2 = 0.99f;
 	const float ADAM_E = 1.0e-15f;
