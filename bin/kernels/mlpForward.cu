@@ -985,9 +985,10 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
         
         if( xi < col )
         {
+			float b4[4];
             for( int j = 0 ; j < row ; j++ ) 
             {
-                float b = matBuffer[ elem( xi /* output xi */, j, arg.m_Ws[i] ) ];
+                float b = BSL4( matBuffer, xi, j, arg.m_Ws[i], b4 );
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
                     float a = getTensor( tensor, j, yi_local );
