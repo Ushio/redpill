@@ -1598,6 +1598,14 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
 				{
 			        if( yi < arg.inputMat.m_row )
 			        {
+                        // Varidation code
+						// bool cond0 = intermediates[elem( xi, yi, arg.m_Is[i] )] == 0.0f;
+						// bool cond1 = ( DoA & ( 1 << yi_local ) ) == 0;
+						// if( cond0 != cond1 )
+						// {
+						// 	printf( "something wrong\n" );
+                        // }
+
                         // if( intermediates[elem( xi, yi, arg.m_Is[i] )] == 0.0f )
 						if( ( DoA & ( 1 << yi_local ) ) == 0 )
 			            {
