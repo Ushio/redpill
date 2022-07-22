@@ -1222,6 +1222,22 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
                     intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = value[yi_local];
                 }
             }
+
+            // derivative of activation
+			float lowerbounds = i + 1 != NERF_DENSITY_LAYER_END ? 0.0f : -3.40282e+38f;
+			uint32_t DoA = 0;
+			for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+			{
+				int yi = yi_global_base + yi_local;
+				if( yi < arg.inputMat.m_row )
+				{
+					if( value[yi_local] != lowerbounds )
+					{
+						DoA |= ( 1 << yi_local );
+					}
+				}
+			}
+			intermediates[elem( xi, yi_global_base / SHARED_TENSOR_ROW, arg.m_DoAs[i + 1] )] = __uint_as_float( DoA );
         }
 
         __syncthreads();
@@ -1269,6 +1285,8 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
 				intermediates[elem( xi, yi, arg.m_Is[NERF_COLOR_LAYER_BEG] )] = sh;
 			}
 		}
+		// derivative of activation
+		intermediates[elem( xi, yi_global_base / SHARED_TENSOR_ROW, arg.m_DoAs[NERF_COLOR_LAYER_BEG] )] = __uint_as_float( 0xFFFFFFFF );
     }
 
     for( int i = NERF_COLOR_LAYER_BEG ; i < NERF_COLOR_LAYER_END ; i++ )
@@ -1320,6 +1338,22 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
                     intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = value[yi_local];
                 }
             }
+
+             // derivative of activation
+			float lowerbounds = i + 1 != NERF_COLOR_LAYER_END ? 0.0f : -3.40282e+38f;
+			uint32_t DoA = 0;
+			for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+			{
+				int yi = yi_global_base + yi_local;
+				if( yi < arg.inputMat.m_row )
+				{
+					if( value[yi_local] != lowerbounds )
+					{
+						DoA |= ( 1 << yi_local );
+					}
+				}
+			}
+			intermediates[elem( xi, yi_global_base / SHARED_TENSOR_ROW, arg.m_DoAs[i + 1] )] = __uint_as_float( DoA );
         }
 
         __syncthreads();
@@ -1555,6 +1589,7 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
             // ReLU derivative
 			bool noActivation = i == 0 || i == NERF_DENSITY_LAYER_END;
 			bool activation = !noActivation;
+			uint32_t DoA = __float_as_uint( intermediates[elem( xi, yi_global_base / SHARED_TENSOR_ROW, arg.m_DoAs[i] )] );
 			for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 			{
 				int yi = yi_global_base + yi_local;
@@ -1563,7 +1598,8 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
 				{
 			        if( yi < arg.inputMat.m_row )
 			        {
-                        if( intermediates[elem( xi, yi, arg.m_Is[i] )] == 0.0f )
+                        // if( intermediates[elem( xi, yi, arg.m_Is[i] )] == 0.0f )
+						if( ( DoA & ( 1 << yi_local ) ) == 0 )
 			            {
 						    value[yi_local] = 0.0f;
                         }

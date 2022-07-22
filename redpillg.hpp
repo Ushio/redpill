@@ -704,6 +704,13 @@ namespace rpml
 					Is.push_back( I );
 				}
 
+				static_assert( SHARED_TENSOR_ROW <= 32, "assume SHARED_TENSOR_ROW <= 32. maybe it is not best" );
+				std::vector<GPUMat> DoAs;
+				for( int i = 0; i < m_Ws.size() + 1; ++i )
+				{
+					DoAs.push_back( allocateGPUMat( &location, maxRow / SHARED_TENSOR_ROW, 64 ) );
+				}
+
 				if( !m_intermediateBuffer || m_intermediateBuffer->bytes() < location * sizeof( float ) )
 				{
 					m_intermediateBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
@@ -751,6 +758,7 @@ namespace rpml
 				for( int i = 0; i < m_Ws.size() + 1; ++i )
 				{
 					arg.m_Is[i] = Is[i];
+					arg.m_DoAs[i] = DoAs[i];
 				}
 				arg.nLayer = m_Ws.size();
 				arg.gridFeatureLocation = m_gridFeatureLocation;

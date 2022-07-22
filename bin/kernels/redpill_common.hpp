@@ -340,6 +340,7 @@ namespace rpml
 		GPUMat m_Ws[16];
 		GPUMat m_Bs[16];
 		GPUMat m_Is[16];
+		GPUMat m_DoAs[16]; // derivative of activation
 		int nLayer;
 		int gridFeatureLocation;
 		int padd1;
