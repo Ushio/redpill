@@ -783,6 +783,13 @@ namespace rpml
 					m_forwardShader->launch( "nerfDerivative", args, gridDim, 1, 1, 64, 1, 1, stream );
 				}
 				{
+#define MEASURE_TRAIN_BACKWARD 0
+#if MEASURE_TRAIN_BACKWARD
+					oroEvent start, stop;
+					oroEventCreateWithFlags( &start, 0 );
+					oroEventCreateWithFlags( &stop, 0 );
+					oroEventRecord( start, stream );
+#endif
 					ShaderArgument args;
 					args.add( m_intermediateBuffer->data() );
 					args.add( m_matBuffer->data() );
@@ -791,6 +798,22 @@ namespace rpml
 
 					int gridDim = div_round_up( inputGPU.m_row, SHARED_TENSOR_ROW );
 					m_forwardShader->launch( "trainNerfBackward", args, gridDim, 1, 1, 1, 64, 1, stream );
+
+#if MEASURE_TRAIN_BACKWARD
+					oroEventRecord( stop, stream );
+
+					oroDeviceSynchronize();
+
+					float milliseconds = 0.0f;
+					oroEventElapsedTime( &milliseconds, start, stop );
+					// printf( "trainNerfBackward - %.5f ms\n", milliseconds );
+					oroEventDestroy( start );
+					oroEventDestroy( stop );
+
+					static float s = 0;
+					s += milliseconds / 1000.0f;
+					printf( "trainNerfBackward - %.5f ss\n", s );
+#endif
 				}
 			}
 

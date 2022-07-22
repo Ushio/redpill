@@ -25,6 +25,19 @@ void setTensor( float* tensor, int xi, int yi, float value )
     tensor[xi * SHARED_TENSOR_ROW + yi] = value;
 }
 
+DEVICE
+float getTensorBSL4( float* tensor, int x, int y, float vals[4] )
+{
+	if( ( y % 4 ) == 0 )
+	{
+		for( int i = 0; i < 4; i++ )
+		{
+			vals[i] = tensor[x * SHARED_TENSOR_ROW + y + i];
+		}
+	}
+	return vals[y % 4];
+}
+
 using namespace rpml;
 
 extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* intermediates, MLPTrainArg arg ) 
@@ -1548,6 +1561,8 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
    //         }
 
             // Weight derivative
+            float x4[4];
+            float y4[4];
             for( int yi_W = 0 ; yi_W < row ; yi_W++ )
             {
                 float dW = 0.0f;
@@ -1556,8 +1571,10 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
                     int yi = yi_global_base + yi_local;
                     if( yi < arg.inputMat.m_row )
                     {
-                        float X = intermediates[elem( yi_W, yi, arg.m_Is[i] /* input Xs */ )];
-                        float Y = getTensor( tensor, xi, yi_local );
+                        // float X = intermediates[elem( yi_W, yi, arg.m_Is[i] /* input Xs */ )];
+                        // float Y = getTensor( tensor, xi, yi_local );
+						float X = BSL4( intermediates, yi_W, yi, arg.m_Is[i] /* input Xs */, x4 );
+						float Y = getTensorBSL4( tensor, xi, yi_local, y4 );
                         dW = fma( X, Y, dW );
                     }
                 }
