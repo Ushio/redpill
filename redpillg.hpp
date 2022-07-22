@@ -683,11 +683,11 @@ namespace rpml
 				GPUMat outputGPU = allocateGPUMat( &location, maxRow, 4 ); // RGB + density
 				GPUMat dirGPU = allocateGPUMat( &location, maxRow, 3 );
 
-				m_Is.clear(); // TODO no member
+				std::vector<GPUMat> Is;
 				{
 					int output = multiResolutionHashOutputDim( m_hashConfig.L, m_hashConfig.F );
 					GPUMat encoded = allocateGPUMat( &location, maxRow, output );
-					m_Is.push_back( encoded );
+					Is.push_back( encoded );
 				}
 				for( int i = 0; i < m_Ws.size(); ++i )
 				{
@@ -701,7 +701,7 @@ namespace rpml
 					}
 					// printf( "outputs [%d] %d\n", i, outputs );
 					GPUMat I = allocateGPUMat( &location, maxRow, outputs );
-					m_Is.push_back( I );
+					Is.push_back( I );
 				}
 
 				if( !m_intermediateBuffer || m_intermediateBuffer->bytes() < location * sizeof( float ) )
@@ -750,7 +750,7 @@ namespace rpml
 				}
 				for( int i = 0; i < m_Ws.size() + 1; ++i )
 				{
-					arg.m_Is[i] = m_Is[i];
+					arg.m_Is[i] = Is[i];
 				}
 				arg.nLayer = m_Ws.size();
 				arg.gridFeatureLocation = m_gridFeatureLocation;
@@ -983,7 +983,6 @@ namespace rpml
 		std::unique_ptr<Buffer> m_intermediateBuffer;
 		std::unique_ptr<Buffer> m_dmatBuffer;
 		std::unique_ptr<Buffer> m_adamBuffer;
-		std::vector<GPUMat> m_Is;
 
 		int m_iteration = 0;
 		int m_scrubmleIndexTrain = 0;
