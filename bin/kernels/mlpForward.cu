@@ -1483,48 +1483,27 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
             __syncthreads();
         }
 
-        if( xi < col )
-        {
-            float dB = 0.0f;
-
-            // ReLU derivative
-			bool noActivation = ( i == NERF_COLOR_LAYER_END - 1 ) || ( i == NERF_DENSITY_LAYER_END - 1 );
-			bool activation = !noActivation;
-            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
-            {
-                float v = getTensor( tensor, xi, yi_local );
-
-				if( activation )
-                {
-                    int yi = yi_global_base + yi_local;
-                    if( yi < arg.inputMat.m_row )
-                    {
-                        if( intermediates[elem( xi, yi, arg.m_Is[i+1] )] == 0.0f )
-                        {
-                            v = 0.0f;
-                        }
-                    }
-					else
-					{
-						v = 0.0f;
-                    }
-                }
-                // bias derivative
-                dB += v;
-
-                if( activation )
-				{
-					setTensor( tensor, xi, yi_local, v );
-				}
-            }
 #if ENABLE_NERF_BIAS
-            if( 0.0f != dB )
-            {
-                atomicAdd( &dMatBuffer[ elem( xi, 0, arg.m_Bs[i] ) ], dB );
-            }
+		// bias derivative
+		if( xi < col )
+		{
+			float dB = 0.0f;
+
+			for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+			{
+				float v = getTensor( tensor, xi, yi_local );
+				int yi = yi_global_base + yi_local;
+				if( yi < arg.outputMat.m_row )
+				{
+				    dB += v;
+                }
+			}
+			if( 0.0f != dB )
+			{
+				atomicAdd( &dMatBuffer[elem( xi, 0, arg.m_Bs[i] )], dB );
+			}
+		}
 #endif
-        }
-        
         __syncthreads();
 
         if( xi < col )
@@ -1570,6 +1549,29 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
                 {
                     float a = getTensor( tensor, j, yi_local );
                     value[yi_local] = fma( a, b, value[yi_local] );
+                }
+            }
+
+            // ReLU derivative
+			bool noActivation = i == 0 || i == NERF_DENSITY_LAYER_END;
+			bool activation = !noActivation;
+			for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+			{
+				int yi = yi_global_base + yi_local;
+
+                if( activation )
+				{
+			        if( yi < arg.inputMat.m_row )
+			        {
+                        if( intermediates[elem( xi, yi, arg.m_Is[i] )] == 0.0f )
+			            {
+						    value[yi_local] = 0.0f;
+                        }
+                    }
+					else
+					{
+						value[yi_local] = 0.0f;
+                    }
                 }
             }
         }
