@@ -542,7 +542,7 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
     float3 ro = make_float3( inputs[x].ro[0], inputs[x].ro[1], inputs[x].ro[2] );
     float3 rd = make_float3( inputs[x].rd[0], inputs[x].rd[1], inputs[x].rd[2] );
     float3 one_over_rd = safe_inv_rd( rd );
-	float2 h = slabs( make_float3( 0.0f, 0.0f, 0.0f ), make_float3( 1.0f, 1.0f, 1.0f ), ro, rd );
+	float2 h = slabs( make_float3( 0.0f, 0.0f, 0.0f ), make_float3( 1.0f, 1.0f, 1.0f ), ro, one_over_rd );
 
     GPUMat outputMat = *nerfSamples;
 
