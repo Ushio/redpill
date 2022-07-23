@@ -75,6 +75,8 @@ int main()
 {
 	using namespace pr;
 
+	Stopwatch executionSW;
+
 	SetDataDir( ExecutableDir() );
 
 	if( oroInitialize( ( oroApi )( ORO_API_HIP | ORO_API_CUDA ), 0 ) )
@@ -98,7 +100,6 @@ int main()
 	oroGetDeviceProperties( &props, device );
 	printf( "GPU: %s\n", props.name );
 
-	NeRF nerf;
 	NeRFg nerfg( pr::GetDataPath( "kernels" ) );
 	std::vector<NerfCamera> cameras;
 
@@ -119,9 +120,10 @@ int main()
 			nlohmann::json camera = frames[i];
 			glm::mat4 m = loadMatrix( camera["transform_matrix"] );
 
+			glm::mat4 rot = glm::rotate( glm::identity<glm::mat4>(), glm::radians( -90.0f ), glm::vec3( 1, 0, 0 ) );
 			glm::mat4 s = glm::scale( glm::identity<glm::mat4>(), glm::vec3( 0.4f, 0.4f, 0.4f ) );
 			glm::mat4 t = glm::translate( glm::identity<glm::mat4>(), glm::vec3( 0.5f, 0.5f, 0.5f ) );
-			m = t * s * m;
+			m = t * s * rot * m;
 
 			NerfCamera nc = {};
 			nc.fovy = fovy;
@@ -136,32 +138,183 @@ int main()
 			std::lock_guard<std::mutex> lc( mu );
 			cameras.push_back( nc );
 		} );
-		//for( int i = 0; i < frames.size(); i++ )
-		//{
-		//	nlohmann::json camera = frames[i];
-		//	glm::mat4 m = loadMatrix( camera["transform_matrix"] );
-
-		//	glm::mat4 s = glm::scale( glm::identity<glm::mat4>(), glm::vec3( 0.4f, 0.4f, 0.4f ) );
-		//	glm::mat4 t = glm::translate( glm::identity<glm::mat4>(), glm::vec3( 0.5f, 0.5f, 0.5f ) );
-		//	m = t * s * m;
-
-		//	NerfCamera nc = {};
-		//	nc.fovy = fovy;
-		//	nc.transform = m;
-		//	nc.path = camera["file_path"].get<std::string>();
-
-		//	std::string file = JoinPath( GetDataPath( "nerf" ), nc.path ) + ".png";
-		//	Result r = nc.image.load( file.c_str() );
-		//	PR_ASSERT( r == Result::Sucess, "" );
-		//	// printf( "%d %d\n", nc.image.width(), nc.image.height() );
-		//	cameras.push_back( nc );
-		//}
 	}
 
-	bool isLearning = true;
+	float scale = 0.5f;
+	const int n_rays_per_batch = 4096;
 
-	//std::string error;
-	//std::shared_ptr<FScene> scene = ReadWavefrontObj( GetDataPath( "nerf/Bulldozer.obj" ), error );
+#if 1
+	{
+		static std::vector<NeRFInput> inputs;
+		static std::vector<NeRFOutput> refs;
+		static StandardRng rng;
+
+		// for( int k = 0; k < 2048; ++k )
+		for( int k = 0; executionSW.elapsed() < 60.0 * 8.0; ++k )
+		{
+			if( ( k % 16 ) == 0 )
+			{
+				printf( "train [%d] at %f\n", k, executionSW.elapsed() );
+			}
+			
+			inputs.clear();
+			refs.clear();
+
+			for( int i = 0; i < n_rays_per_batch; ++i )
+			{
+				int camIdx = rng.drawUInt() % cameras.size();
+				const NerfCamera& nc = cameras[camIdx];
+
+				glm::vec3 o = { 0, 0, 0 };
+				glm::vec3 up = { 0, 1, 0 };
+				glm::vec3 lookat = { 0, 0, -1 };
+
+				up = glm::mat3( glm::inverseTranspose( nc.transform ) ) * up;
+				o = nc.transform * glm::vec4( o, 1.0f );
+				lookat = nc.transform * glm::vec4( lookat, 1.0f );
+
+				Camera3D cam3d;
+				cam3d.origin = o;
+				cam3d.lookat = lookat;
+				cam3d.up = up;
+				cam3d.fovy = nc.fovy;
+				cam3d.zFar = 4.0f;
+				cam3d.zNear = 0.1f;
+				cam3d.zUp = false;
+				glm::mat4 view, proj;
+				GetCameraMatrix( cam3d, &proj, &view, 800, 800 );
+				CameraRayGenerator raygen( view, proj, 800, 800 );
+
+				glm::vec3 ro;
+				glm::vec3 rd;
+				int x = rng.drawUInt() % 800;
+				int y = rng.drawUInt() % 800;
+				raygen.shoot( &ro, &rd, x, y, rng.draw(), rng.draw() );
+				rd = glm::normalize( rd );
+
+				glm::vec3 one_over_rd = safe_inv_rd( rd );
+				glm::vec3 input_ro = ro;
+
+				NeRFInput input;
+				input.ro[0] = input_ro.x;
+				input.ro[1] = input_ro.y;
+				input.ro[2] = input_ro.z;
+				input.rd[0] = rd.x;
+				input.rd[1] = rd.y;
+				input.rd[2] = rd.z;
+				inputs.push_back( input );
+
+				glm::uvec4 color = nc.image( x, y );
+				NeRFOutput output = {};
+	#if LINEAR_SPACE_LEARNING
+				output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
+				output.color[1] = std::pow( (float)color.y / 255.0f, 2.2f );
+				output.color[2] = std::pow( (float)color.z / 255.0f, 2.2f );
+	#else
+				output.color[0] = (float)color.x / 255.0f;
+				output.color[1] = (float)color.y / 255.0f;
+				output.color[2] = (float)color.z / 255.0f;
+	#endif
+				output.color[3] = (float)color.z / 255.0f;
+				refs.push_back( output );
+			}
+			nerfg.train( inputs.data(), refs.data(), inputs.size(), stream );
+		}
+	}
+
+
+	pr::AbcArchive archive;
+	std::string errorMessage;
+	if( archive.open( GetDataPath( "camera.abc" ), errorMessage ) == AbcArchive::Result::Failure )
+	{
+		printf( "Alembic Error: %s\n", errorMessage.c_str() );
+	}
+
+	for( int i = 0; i < archive.frameCount() ; ++i )
+	{
+		printf( "render [%d] at %f\n", i, executionSW.elapsed() );
+
+		auto scene = archive.readFlat( i, errorMessage );
+		Camera3D camera;
+		int imageWidth = 0;
+		int imageHeight = 0;
+		scene->visitCamera( [&]( std::shared_ptr<const pr::FCameraEntity> cameraEntity )
+		{ 
+			if( cameraEntity->visible() )
+			{
+				camera = cameraFromEntity( cameraEntity.get() ); 
+				imageWidth = cameraEntity->imageWidth();
+				imageHeight = cameraEntity->imageHeight();
+			}
+		} );
+
+		std::vector<NeRFInput> nerf_in;
+		std::vector<NeRFOutput> nerf_out;
+		
+		Image2DRGBA8 image;
+		image.allocate( imageWidth, imageHeight );
+
+		glm::mat4 viewMat, projMat;
+		GetCameraMatrix( camera, &projMat, &viewMat, imageWidth, imageHeight );
+		CameraRayGenerator rayGenerator( viewMat, projMat, imageWidth, imageHeight );
+		for( int y = 0; y < image.height(); ++y )
+		{
+			for( int x = 0; x < image.width(); ++x )
+			{
+				glm::vec3 ro, rd;
+				rayGenerator.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
+				rd = glm::normalize( rd );
+
+				glm::vec3 input_ro = ro * scale + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+
+				NeRFInput input;
+				input.ro[0] = input_ro.x;
+				input.ro[1] = input_ro.y;
+				input.ro[2] = input_ro.z;
+				input.rd[0] = rd.x;
+				input.rd[1] = rd.y;
+				input.rd[2] = rd.z;
+				nerf_in.push_back( input );
+			}
+		}
+
+		nerf_out.resize( nerf_in.size() );
+		nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
+
+		int it = 0;
+		for( int y = 0; y < image.height(); ++y )
+		{
+			for( int x = 0; x < image.width(); ++x )
+			{
+				NeRFOutput o = nerf_out[it++];
+#if LINEAR_SPACE_LEARNING
+				float r = glm::clamp( pow( o.color[0], 0.454545f ), 0.0f, 1.0f );
+				float g = glm::clamp( pow( o.color[1], 0.454545f ), 0.0f, 1.0f );
+				float b = glm::clamp( pow( o.color[2], 0.454545f ), 0.0f, 1.0f );
+#else
+				float r = glm::clamp( o.color[0], 0.0f, 1.0f );
+				float g = glm::clamp( o.color[1], 0.0f, 1.0f );
+				float b = glm::clamp( o.color[2], 0.0f, 1.0f );
+
+#endif
+				glm::u8vec4 color;
+				color.r = r * 255.0f;
+				color.g = g * 255.0f;
+				color.b = b * 255.0f;
+				color.a = 255;
+				image( x, y ) = color;
+			}
+		}
+
+		char fileout[256];
+		sprintf( fileout, "image_%04d.png", i );
+		image.saveAsPng( GetDataPath( fileout ).c_str() );
+	}
+
+	return 0;
+#endif
+
+	bool isLearning = true;
 
 	ITexture* bg = CreateTexture();
 
@@ -187,19 +340,6 @@ int main()
 
 	static float globalscale = 0.040;
 	static glm::vec3 globallocation = glm::vec3( 0.074, 0.210, -0.192 );
-
-	// tmp
-	//{
-	//	glm::vec3 o = { 0, 0, 0 };
-	//	glm::vec3 up = { 0, 1, 0 };
-	//	glm::vec3 lookat = { 0, 0, -1 };
-
-	//	NerfCamera nc = cameras[2];
-	//	camera.up = glm::mat3( glm::inverseTranspose( nc.transform ) ) * up;
-	//	camera.origin = nc.transform * glm::vec4( o, 1.0f );
-	//	camera.lookat = nc.transform * glm::vec4( lookat, 1.0f );
-	//	camera.fovy = nc.fovy;
-	//}
 
 	int _stride = 8;
 
@@ -229,9 +369,7 @@ int main()
 		static std::vector<NeRFOutput> refs;
 		static StandardRng rng;
 
-		float scale = 0.5f;
-
-		const int n_rays_per_batch = 4096;
+		
 
 		static int iterations = 0; 
 
@@ -265,7 +403,7 @@ int main()
 				cam3d.zNear = 0.1f;
 				cam3d.zUp = false;
 				glm::mat4 view, proj;
-				GetCameraMatrix( cam3d, &proj, &view );
+				GetCameraMatrix( cam3d, &proj, &view, 800, 800 );
 				CameraRayGenerator raygen( view, proj, 800, 800 );
 
 				glm::vec3 ro;
@@ -276,7 +414,6 @@ int main()
 				rd = glm::normalize( rd );
 
 				glm::vec3 one_over_rd = safe_inv_rd( rd );
-				// glm::vec3 input_ro = ro * scale * 0.75f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
 				glm::vec3 input_ro = ro;
 
 				NeRFInput input;
@@ -300,13 +437,10 @@ int main()
 				output.color[2] = (float)color.z / 255.0f;
 #endif
 				output.color[3] = (float)color.z / 255.0f;
-				// printf( "%f %f %f\n", output.color[0], output.color[1], output.color[2] );
 				refs.push_back( output );
 			}
-			//printf( "input: %d\n", (int)inputs.size() );
 			Stopwatch sw;
 			nerfg.train( inputs.data(), refs.data(), inputs.size(), stream );
-			//loss = nerf.train( inputs.data(), refs.data(), inputs.size() );
 			//printf( "loss %f, t = %f\n", loss / inputs.size(), sw.elapsed() );
 		}
 
@@ -317,7 +451,7 @@ int main()
 		image.allocate( GetScreenWidth() / _stride, GetScreenHeight() / _stride );
 
 		glm::mat4 viewMat, projMat;
-		GetCameraMatrix( camera, &projMat, &viewMat );
+		GetCameraMatrix( camera, &projMat, &viewMat, GetScreenWidth(), GetScreenHeight() );
 		CameraRayGenerator rayGenerator( viewMat, projMat, image.width(), image.height() );
 		for( int y = 0; y < image.height(); ++y )
 		{
@@ -521,6 +655,17 @@ int main()
 		//	glm::vec3 rd = { imp.rd[0], imp.rd[1], imp.rd[2] };
 		//	DrawArrow( ro, ro + rd *2.0f, 0.001f, { 255, 255, 255 } );
 		//}
+		
+		static float guidebox_x = 0.0f;
+		static float guidebox_y = 0.0f;
+		static float guidebox_z = 0.0f;
+		static float guidebox_sx = 1.0f;
+		static float guidebox_sy = 0.9f;
+		static float guidebox_sz = 0.9f;
+
+		glm::vec3 center = { guidebox_x, guidebox_y, guidebox_z };
+		glm::vec3 size = { guidebox_sx, guidebox_sy, guidebox_sz };
+		DrawAABB( center - size * 0.5f, center + size * 0.5f, { 255, 255, 255 }, 2 );
 
 		PopGraphicState();
 		EndCamera();
@@ -583,6 +728,13 @@ int main()
 			CaptureScreen( &img );
 			img.saveAsPng( "c.png" );
 		}
+
+		ImGui::InputFloat( "guide box x", &guidebox_x, 0.1f );
+		ImGui::InputFloat( "guide box y", &guidebox_y, 0.1f );
+		ImGui::InputFloat( "guide box z", &guidebox_z, 0.1f );
+		ImGui::InputFloat( "guide box sx", &guidebox_sx, 0.1f );
+		ImGui::InputFloat( "guide box sy", &guidebox_sy, 0.1f );
+		ImGui::InputFloat( "guide box sz", &guidebox_sz, 0.1f );
 
 		ImGui::End();
 
