@@ -278,36 +278,30 @@ int main()
 				glm::vec3 one_over_rd = safe_inv_rd( rd );
 				// glm::vec3 input_ro = ro * scale * 0.75f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
 				glm::vec3 input_ro = ro;
-				glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
 
-				if( h.x /* min */ < h.y /* max */ )
-				{
-					input_ro = input_ro + rd * h.x; // move to inside
+				NeRFInput input;
+				input.ro[0] = input_ro.x;
+				input.ro[1] = input_ro.y;
+				input.ro[2] = input_ro.z;
+				input.rd[0] = rd.x;
+				input.rd[1] = rd.y;
+				input.rd[2] = rd.z;
+				inputs.push_back( input );
 
-					NeRFInput input;
-					input.ro[0] = input_ro.x;
-					input.ro[1] = input_ro.y;
-					input.ro[2] = input_ro.z;
-					input.rd[0] = rd.x;
-					input.rd[1] = rd.y;
-					input.rd[2] = rd.z;
-					inputs.push_back( input );
-
-					glm::uvec4 color = nc.image( x, y );
-					NeRFOutput output = {};
+				glm::uvec4 color = nc.image( x, y );
+				NeRFOutput output = {};
 #if LINEAR_SPACE_LEARNING
-					output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
-					output.color[1] = std::pow( (float)color.y / 255.0f, 2.2f );
-					output.color[2] = std::pow( (float)color.z / 255.0f, 2.2f );
+				output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
+				output.color[1] = std::pow( (float)color.y / 255.0f, 2.2f );
+				output.color[2] = std::pow( (float)color.z / 255.0f, 2.2f );
 #else
-					output.color[0] = (float)color.x / 255.0f;
-					output.color[1] = (float)color.y / 255.0f;
-					output.color[2] = (float)color.z / 255.0f;
+				output.color[0] = (float)color.x / 255.0f;
+				output.color[1] = (float)color.y / 255.0f;
+				output.color[2] = (float)color.z / 255.0f;
 #endif
-					output.color[3] = (float)color.z / 255.0f;
-					// printf( "%f %f %f\n", output.color[0], output.color[1], output.color[2] );
-					refs.push_back( output );
-				}
+				output.color[3] = (float)color.z / 255.0f;
+				// printf( "%f %f %f\n", output.color[0], output.color[1], output.color[2] );
+				refs.push_back( output );
 			}
 			//printf( "input: %d\n", (int)inputs.size() );
 			Stopwatch sw;
@@ -333,88 +327,44 @@ int main()
 				rayGenerator.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
 				rd = glm::normalize( rd );
 
-				glm::vec3 one_over_rd = safe_inv_rd( rd );
 				glm::vec3 input_ro = ro * scale + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
-				glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
 
-				if( h.x /* min */ < h.y /* max */ )
-				{
-					input_ro = input_ro + rd * h.x; // move to inside
-
-					NeRFInput input;
-					input.ro[0] = input_ro.x;
-					input.ro[1] = input_ro.y;
-					input.ro[2] = input_ro.z;
-					input.rd[0] = rd.x;
-					input.rd[1] = rd.y;
-					input.rd[2] = rd.z;
-					nerf_in.push_back( input );
-				}
-				else
-				{
-					//NeRFInput input;
-					//input.ro[0] = 10;
-					//input.ro[1] = 10;
-					//input.ro[2] = 10;
-					//input.rd[0] = 1;
-					//input.rd[1] = 0;
-					//input.rd[2] = 0;
-					//nerf_in.push_back( input );
-				}
+				NeRFInput input;
+				input.ro[0] = input_ro.x;
+				input.ro[1] = input_ro.y;
+				input.ro[2] = input_ro.z;
+				input.rd[0] = rd.x;
+				input.rd[1] = rd.y;
+				input.rd[2] = rd.z;
+				nerf_in.push_back( input );
 			}
 		}
 
 		nerf_out.resize( nerf_in.size() );
-
-		//if( isCPUEval )
-		//{
-		//	nerf.forward( nerf_in.data(), nerf_out.data(), nerf_in.size() );
-		//}
-		//else
-		{
-			//nerfg.takeReference( nerf );
-			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
-		}
+		nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
 
 		int it = 0;
 		for( int y = 0; y < image.height(); ++y )
 		{
 			for( int x = 0; x < image.width(); ++x )
 			{
-				glm::vec3 ro, rd;
-				rayGenerator.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
-				rd = glm::normalize( rd );
-
-				glm::vec3 one_over_rd = safe_inv_rd( rd );
-				glm::vec3 input_ro = ro * scale + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
-				glm::vec2 h = slabs( { 0, 0, 0 }, { 1, 1, 1 }, input_ro, one_over_rd );
-
-				if( h.x /* min */ < h.y /* max */ )
-				{
-					NeRFOutput o = nerf_out[it++];
+				NeRFOutput o = nerf_out[it++];
 #if LINEAR_SPACE_LEARNING
-					float r = glm::clamp( pow( o.color[0], 0.454545f ), 0.0f, 1.0f );
-					float g = glm::clamp( pow( o.color[1], 0.454545f ), 0.0f, 1.0f );
-					float b = glm::clamp( pow( o.color[2], 0.454545f ), 0.0f, 1.0f );
+				float r = glm::clamp( pow( o.color[0], 0.454545f ), 0.0f, 1.0f );
+				float g = glm::clamp( pow( o.color[1], 0.454545f ), 0.0f, 1.0f );
+				float b = glm::clamp( pow( o.color[2], 0.454545f ), 0.0f, 1.0f );
 #else
-					float r = glm::clamp( o.color[0], 0.0f, 1.0f );
-					float g = glm::clamp( o.color[1], 0.0f, 1.0f );
-					float b = glm::clamp( o.color[2], 0.0f, 1.0f );
+				float r = glm::clamp( o.color[0], 0.0f, 1.0f );
+				float g = glm::clamp( o.color[1], 0.0f, 1.0f );
+				float b = glm::clamp( o.color[2], 0.0f, 1.0f );
 
 #endif
-					glm::u8vec4 color;
-					color.r = r * 255.0f;
-					color.g = g * 255.0f;
-					color.b = b * 255.0f;
-					color.a = 255;
-					image( x, y ) = color;
-
-					// printf( " %.5f %.5f %.5f\n", o.color[0], o.color[1], o.color[2] );
-				}
-				else
-				{
-					image( x, y ) = { 0, 0, 0, 255 };
-				}
+				glm::u8vec4 color;
+				color.r = r * 255.0f;
+				color.g = g * 255.0f;
+				color.b = b * 255.0f;
+				color.a = 255;
+				image( x, y ) = color;
 			}
 		}
 		bg->upload( image );
