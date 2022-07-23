@@ -150,7 +150,7 @@ int main()
 		static StandardRng rng;
 
 		// for( int k = 0; k < 2048; ++k )
-		for( int k = 0; executionSW.elapsed() < 60.0 * 8.0; ++k )
+		for( int k = 0; executionSW.elapsed() < 60.0 * 7.0; ++k )
 		{
 			if( ( k % 16 ) == 0 )
 			{
