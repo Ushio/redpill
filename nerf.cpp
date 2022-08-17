@@ -71,6 +71,172 @@ inline glm::vec3 safe_inv_rd( glm::vec3 rd )
 {
 	return glm::clamp( glm::vec3( 1.0f, 1.0f, 1.0f ) / rd, glm::vec3( -FLT_MAX, -FLT_MAX, -FLT_MAX ), glm::vec3( FLT_MAX, FLT_MAX, FLT_MAX ) );
 }
+
+inline void invserseDistort( float* xpOut, float* ypOut, float xpp, float ypp, float k1, float k2, float p1, float p2, float k3 )
+{
+	float xp_i = xpp;
+	float yp_i = ypp;
+	for( int i = 0; i < 10; ++i )
+	{
+		float xp2 = xp_i * xp_i;
+		float yp2 = yp_i * yp_i;
+		float xpyp = xp_i * yp_i;
+		float r2 = xp2 + yp2;
+		float g = std::fma( std::fma( std::fma( k3, r2, k2 ), r2, k1 ), r2, 1.0f );
+
+		float nx = ( xpp - ( 2.0f * p1 * xpyp + p2 * ( r2 + 2.0f * xp2 ) ) ) / g;
+		float ny = ( ypp - ( p1 * ( r2 + 2.0f * yp2 ) + 2.0f * p2 * xpyp ) ) / g;
+		xp_i = nx;
+		yp_i = ny;
+	}
+	*xpOut = xp_i;
+	*ypOut = yp_i;
+}
+
+struct OpenCVIntrinsicParam
+{
+	int width;
+	int height;
+	float fx;
+	float fy;
+	float cx;
+	float cy;
+	float k1;
+	float k2;
+	float p1;
+	float p2;
+};
+class ColmapCamera
+{
+public:
+	struct Camera
+	{
+		glm::mat4 transform;
+		OpenCVIntrinsicParam intrinsicParam;
+		std::string imagePath;
+		pr::Image2DRGBA8 image;
+	};
+	void load( const char* configDir )
+	{
+		m_cameras.clear();
+
+		std::string cameras = pr::JoinPath( configDir, "cameras.txt" );
+		std::string images = pr::JoinPath( configDir, "images.txt" );
+		std::string imagedir = pr::JoinPath( configDir, "images" );
+
+		std::map<int, OpenCVIntrinsicParam> intrinsics;
+		std::ifstream camerasStream( cameras );
+		std::string line;
+		while( std::getline( camerasStream, line ) )
+		{
+			if( line[0] == '#' )
+				continue;
+
+			int index;
+			OpenCVIntrinsicParam intrinsic;
+			int n = sscanf( line.c_str(), "%d OPENCV %d %d %f %f %f %f %f %f %f %f %f",
+					&index, &intrinsic.width, &intrinsic.height,
+					&intrinsic.fx, &intrinsic.fy, &intrinsic.cx, &intrinsic.cy,
+					&intrinsic.k1, &intrinsic.k2, &intrinsic.p1, &intrinsic.p2 );
+
+			if( n == 11 )
+			{
+				intrinsics[index] = intrinsic;
+			}
+		}
+
+		std::ifstream imagesStream( images );
+		while( std::getline( imagesStream, line ) )
+		{
+			if( line[0] == '#' )
+				continue;
+
+			Camera camera;
+			int index;
+			int intrinsicIndex;
+			char imagename[256] = {};
+			glm::quat rotation;
+			glm::vec3 translation;
+			int n = sscanf( line.c_str(), "%d %f %f %f %f %f %f %f %d %s",
+							&index,
+							&rotation.w, &rotation.x, &rotation.y, &rotation.z,
+							&translation.x, &translation.y, &translation.z,
+							&intrinsicIndex, imagename );
+			if( n != 10 )
+			{
+				continue;
+			}
+			PR_ASSERT( intrinsics.count( intrinsicIndex ) == 1 );
+
+			glm::mat4 transform = glm::translate( glm::identity<glm::mat4>(), translation ) * glm::mat4_cast( rotation );
+			transform = glm::inverse( transform );
+
+			// 
+			glm::mat4 adjustmentMatrix = glm::identity<glm::mat4>();
+
+			adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.457007, 0.256999, 0.704056 } );
+
+			// x -> y -> z
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -356.442f ), { 0, 0, 1 } );
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 75.0906f ), { 0, 1, 0 } );
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -208.556f ), { 1, 0, 0 } );
+
+			adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.0779408f, 0.0779408f, 0.0779408f } );
+
+			camera.transform = adjustmentMatrix * transform;
+			camera.intrinsicParam = intrinsics[intrinsicIndex];
+			camera.imagePath = pr::JoinPath( imagedir, imagename );
+
+			m_cameras.push_back( camera );
+
+			// skip a line
+			std::getline( imagesStream, line );
+		}
+
+		pr::ParallelFor( m_cameras.size(), [&]( int i )
+		{
+			m_cameras[i].image.load( m_cameras[i].imagePath.c_str() );
+		} );
+	}
+
+	int numberOfCamera() const 
+	{
+		return m_cameras.size();
+	}
+
+	// note: nearClip, farClip is scaled by the transform
+	void sample( glm::u8vec4* colorOut, glm::vec3* roOut, glm::vec3* rdOut, float nearClip, float farClip, int cameraIndex, float x0, float x1 )
+	{
+		const Camera& camera = m_cameras[cameraIndex];
+
+		float u = x0 * camera.intrinsicParam.width;
+		float v = x1 * camera.intrinsicParam.height;
+
+		float xpp = ( u - camera.intrinsicParam.cx ) / camera.intrinsicParam.fx;
+		float ypp = ( v - camera.intrinsicParam.cy ) / camera.intrinsicParam.fy;
+
+		float xp;
+		float yp;
+		invserseDistort( &xp, &yp, xpp, ypp, camera.intrinsicParam.k1, camera.intrinsicParam.k2, camera.intrinsicParam.p1, camera.intrinsicParam.p2, 0.0f );
+
+		glm::vec3 ro = { xp * nearClip, yp * nearClip, nearClip };
+		glm::vec3 to = { xp * farClip, yp * farClip, farClip };
+
+		int srcX = std::min( (int)u, camera.intrinsicParam.width - 1 );
+		int srcY = std::min( (int)v, camera.intrinsicParam.height - 1 );
+
+		// Apply Transform
+		ro = camera.transform * glm::vec4( ro, 1.0f );
+		to = camera.transform * glm::vec4( to, 1.0f );
+		glm::vec3 rd = to - ro;
+
+		*colorOut = camera.image( srcX, srcY );
+		*roOut = ro;
+		*rdOut = rd;
+	}
+	std::vector<Camera> m_cameras;
+};
+
 int main()
 {
 	using namespace pr;
@@ -100,50 +266,55 @@ int main()
 	oroGetDeviceProperties( &props, device );
 	printf( "GPU: %s\n", props.name );
 
+	ColmapCamera colmap;
+	colmap.load( pr::GetDataPath( "nerf/colmap" ).c_str() );
+
 	NeRFg nerfg( pr::GetDataPath( "kernels" ) );
 	std::vector<NerfCamera> cameras;
 
 	// for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )
-	for( auto filePath : { "nerf/transforms_train.json" } )
-	{
-		std::ifstream ifs( GetDataPath( filePath ) );
-		nlohmann::json j;
-		ifs >> j;
 
-		nlohmann::json camera_angle_x = j["camera_angle_x"];
-		float fovy = camera_angle_x.get<float>();
+	//for( auto filePath : { "nerf/transforms_train.json" } )
+	//{
+	//	std::ifstream ifs( GetDataPath( filePath ) );
+	//	nlohmann::json j;
+	//	ifs >> j;
 
-		nlohmann::json frames = j["frames"];
+	//	nlohmann::json camera_angle_x = j["camera_angle_x"];
+	//	float fovy = camera_angle_x.get<float>();
 
-		std::mutex mu;
-		pr::ParallelFor( frames.size(), [&]( int i ) {
-			nlohmann::json camera = frames[i];
-			glm::mat4 m = loadMatrix( camera["transform_matrix"] );
+	//	nlohmann::json frames = j["frames"];
 
-			glm::mat4 rot = glm::rotate( glm::identity<glm::mat4>(), glm::radians( -90.0f ), glm::vec3( 1, 0, 0 ) );
-			glm::mat4 s = glm::scale( glm::identity<glm::mat4>(), glm::vec3( 0.4f, 0.4f, 0.4f ) );
-			glm::mat4 t = glm::translate( glm::identity<glm::mat4>(), glm::vec3( 0.5f, 0.5f, 0.5f ) );
-			m = t * s * rot * m;
+	//	std::mutex mu;
+	//	pr::ParallelFor( frames.size(), [&]( int i ) {
+	//		nlohmann::json camera = frames[i];
+	//		glm::mat4 m = loadMatrix( camera["transform_matrix"] );
 
-			NerfCamera nc = {};
-			nc.fovy = fovy;
-			nc.transform = m;
-			nc.path = camera["file_path"].get<std::string>();
+	//		glm::mat4 rot = glm::rotate( glm::identity<glm::mat4>(), glm::radians( -90.0f ), glm::vec3( 1, 0, 0 ) );
+	//		glm::mat4 s = glm::scale( glm::identity<glm::mat4>(), glm::vec3( 0.4f, 0.4f, 0.4f ) );
+	//		glm::mat4 t = glm::translate( glm::identity<glm::mat4>(), glm::vec3( 0.5f, 0.5f, 0.5f ) );
+	//		m = t * s * rot * m;
 
-			std::string file = JoinPath( GetDataPath( "nerf" ), nc.path ) + ".png";
-			Result r = nc.image.load( file.c_str() );
-			PR_ASSERT( r == Result::Sucess, "" );
-			// printf( "%d %d\n", nc.image.width(), nc.image.height() );
+	//		NerfCamera nc = {};
+	//		nc.fovy = fovy;
+	//		nc.transform = m;
+	//		nc.path = camera["file_path"].get<std::string>();
 
-			std::lock_guard<std::mutex> lc( mu );
-			cameras.push_back( nc );
-		} );
-	}
+	//		std::string file = JoinPath( GetDataPath( "nerf" ), nc.path ) + ".png";
+	//		Result r = nc.image.load( file.c_str() );
+	//		PR_ASSERT( r == Result::Sucess, "" );
+	//		// printf( "%d %d\n", nc.image.width(), nc.image.height() );
+
+	//		std::lock_guard<std::mutex> lc( mu );
+	//		cameras.push_back( nc );
+	//	} );
+	//}
+
 
 	float scale = 0.5f;
 	const int n_rays_per_batch = 4096;
 
-#if 1
+#if 0
 	{
 		static std::vector<NeRFInput> inputs;
 		static std::vector<NeRFOutput> refs;
@@ -363,6 +534,22 @@ int main()
 
 		DrawAABB( { -1, -1, -1 }, { 1, 1, 1 }, { 255, 0, 0 } );
 
+		// colmap view
+		for( int i = 0; i < colmap.numberOfCamera(); ++i )
+		{
+			glm::u8vec4 color;
+			glm::vec3 ro;
+			glm::vec3 rd;
+			colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, i, 0.0f, 0.0f );
+			DrawLine( ro, ro + rd, { 128, 128, 128 } );
+			colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, i, 1.0f, 0.0f );
+			DrawLine( ro, ro + rd, { 128, 128, 128 } );
+			colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, i, 0.0f, 1.0f );
+			DrawLine( ro, ro + rd, { 128, 128, 128 } );
+			colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, i, 1.0f, 1.0f );
+			DrawLine( ro, ro + rd, { 128, 128, 128 } );
+		}
+
 		// learning data
 		float loss = 0;
 		static std::vector<NeRFInput> inputs;
@@ -383,6 +570,8 @@ int main()
 
 			for( int i = 0; i < n_rays_per_batch; ++i )
 			{
+				// LEGO 
+#if 0
 				int camIdx = rng.drawUInt() % cameras.size();
 				const NerfCamera& nc = cameras[camIdx];
 
@@ -424,8 +613,27 @@ int main()
 				input.rd[1] = rd.y;
 				input.rd[2] = rd.z;
 				inputs.push_back( input );
-
 				glm::uvec4 color = nc.image( x, y );
+#endif
+
+#if 1
+				int camIdx = rng.drawUInt() % colmap.numberOfCamera();
+				glm::u8vec4 color;
+				glm::vec3 ro;
+				glm::vec3 rd;
+				colmap.sample( &color, &ro, &rd, 0.1f, 1.0f, camIdx, rng.draw(), rng.draw() );
+				rd = glm::normalize( rd );
+
+				NeRFInput input;
+				input.ro[0] = ro.x;
+				input.ro[1] = ro.y;
+				input.ro[2] = ro.z;
+				input.rd[0] = rd.x;
+				input.rd[1] = rd.y;
+				input.rd[2] = rd.z;
+				inputs.push_back( input );
+#endif
+
 				NeRFOutput output = {};
 #if LINEAR_SPACE_LEARNING
 				output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
@@ -444,6 +652,8 @@ int main()
 			//printf( "loss %f, t = %f\n", loss / inputs.size(), sw.elapsed() );
 		}
 
+
+#if 1
 		static std::vector<NeRFInput> nerf_in;
 		static std::vector<NeRFOutput> nerf_out;
 		nerf_in.clear();
@@ -461,7 +671,7 @@ int main()
 				rayGenerator.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
 				rd = glm::normalize( rd );
 
-				glm::vec3 input_ro = ro * scale + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+				glm::vec3 input_ro = ro * 0.5f + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
 
 				NeRFInput input;
 				input.ro[0] = input_ro.x;
@@ -503,37 +713,6 @@ int main()
 		}
 		bg->upload( image );
 
-#if 0
-		float step = 2.0f / NERF_OCCUPANCY_GRID_MIN_RES;
-		PrimBegin( pr::PrimitiveMode::Points, 4 );
-		if( !nerfg.m_grid.empty() )
-		for( int i = 0; i < nerfg.m_grid.size() ; i++ )
-		{
-			int yi = i;
-		    int index_z = yi / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
-			yi = yi % ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
-			int index_y = yi / NERF_OCCUPANCY_GRID_MIN_RES;
-			yi = yi % NERF_OCCUPANCY_GRID_MIN_RES;
-			int index_x = yi;
-
-			//if( ( i % 127 ) == 0 )
-			//{
-			//	printf( "den %f\n", nerfg.m_grid[i] );
-			//	 printf("d %f %f %f\n", mlp, optical_thickness, MIN_CONE_STEPSIZE(), scalbnf(MIN_CONE_STEPSIZE(), level) );
-			//}
-
-			if( nerfg.m_avg < nerfg.m_grid[i] )
-			{
-				glm::vec3 p = {
-					-1.0f + step * index_x + step * 0.5f,
-					-1.0f + step * index_y + step * 0.5f,
-					-1.0f + step * index_z + step * 0.5f
-				};
-				int c = minss( nerfg.m_grid[yi] * 255, 255 );
-				PrimVertex( p, { c, c, c } );
-			}
-		}
-		PrimEnd();
 #endif
 		//static int iterations = 0;
 		//if( iterations++ > 32 )
