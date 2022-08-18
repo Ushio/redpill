@@ -918,13 +918,14 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
         {
             int yi = yi_global_base + yi_local;
 
-            int hashbase = NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * 3 * iteration;
+            // int hashbase = NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * 3 * iteration;
             int index_z = yi / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES ); yi = yi % ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
             int index_y = yi / NERF_OCCUPANCY_GRID_MIN_RES; yi = yi % NERF_OCCUPANCY_GRID_MIN_RES;
             int index_x = yi;
-            float pz = ( index_z + hash1( hashbase + yi * 3 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES ) ;
-            float py = ( index_y + hash1( hashbase + yi * 3 + 1 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
-            float px = ( index_x + hash1( hashbase + yi * 3 + 2 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
+            float3 randomNumber = pcg3df( make_uint3( yi, iteration, 4893738 ) );
+			float pz = ( index_z + randomNumber.x ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
+			float py = ( index_y + randomNumber.y ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
+			float px = ( index_x + randomNumber.z ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
             float v;
             if( xi == 0 )
             {
@@ -1035,14 +1036,10 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
 
             int yi = yi_global_base + yi_local;
 
-            int hashbase = NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * 3 * iteration;
             int index_z = yi / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES ); yi = yi % ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
             int index_y = yi / NERF_OCCUPANCY_GRID_MIN_RES; yi = yi % NERF_OCCUPANCY_GRID_MIN_RES;
             int index_x = yi;
-            float pz = ( index_z + hash1( hashbase + yi * 3 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES ) ;
-            float py = ( index_y + hash1( hashbase + yi * 3 + 1 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
-            float px = ( index_x + hash1( hashbase + yi * 3 + 2 ) ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
-            
+
             int res = NERF_OCCUPANCY_GRID_MIN_RES;
             for( int lv = 0 ; lv < NERF_OCCUPANCY_GRID_L ; lv++ )
             {
@@ -1389,7 +1386,7 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
     }
 }
 
-extern "C" __global__ void nerfDerivative( NeRFRay *rays, NeRFOutput* refs, float* intermediates, GPUMat nerfSamples, int nElement ) 
+extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, float* intermediates, GPUMat nerfSamples, int nElement, int iteration )
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if( nElement <= x )

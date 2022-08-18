@@ -674,7 +674,7 @@ int main()
 				output.color[1] = (float)color.y / 255.0f;
 				output.color[2] = (float)color.z / 255.0f;
 #endif
-				output.color[3] = (float)color.z / 255.0f;
+				output.color[3] = (float)color.w / 255.0f;
 				refs.push_back( output );
 			}
 			Stopwatch sw;

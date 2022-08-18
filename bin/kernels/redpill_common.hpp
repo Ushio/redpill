@@ -65,6 +65,31 @@ namespace rpml
 		n = n * (n * n * 15731U + 789221U) + 1376312589U;
 		return float( n & uint32_t(0x7fffffffU))/float(0x7fffffff);
 	}
+
+#if IS_HOST == 0
+	DEVICE_INLINE float3 pcg3df( uint3 v )
+	{
+		v = v * 1664525u + 1013904223u;
+		v.x += v.y * v.z;
+		v.y += v.z * v.x;
+		v.z += v.x * v.y;
+		
+		v.x = v.x ^ ( v.x >> 16u );
+		v.y = v.y ^ ( v.y >> 16u );
+		v.z = v.z ^ ( v.z >> 16u );
+
+		v.x += v.y * v.z;
+		v.y += v.z * v.x;
+		v.z += v.x * v.y;
+		
+		return make_float3( 
+			v.x & uint32_t( 0x7fffffffU ),
+			v.y & uint32_t( 0x7fffffffU ),
+			v.z & uint32_t( 0x7fffffffU )
+		) / make_float3( (float)0x7fffffffU );
+	}
+#endif
+
     struct GPUMat
 	{
 		int m_row; // = inputs
@@ -307,8 +332,7 @@ namespace rpml
 	};
 	struct NeRFOutput
 	{
-		float color[3];
-		float pad;
+		float color[4];
 	};
 	struct NeRFMarching
 	{

@@ -727,7 +727,7 @@ namespace rpml
 					args.add( m_nerfSamplesBuffer->data() );
 					args.add( dirGPU );
 					args.add( nItems );
-					args.add( m_scrubmleIndexTrain++ );
+					args.add( m_nerfRaysIteration++ );
 					args.add( m_occupancyBuffer->data() );
 					args.add( m_occupancyAvgBuffer->data() );
 
@@ -778,7 +778,8 @@ namespace rpml
 					args.add( m_intermediateBuffer->data() );
 					args.add( outputGPU );
 					args.add( nItems );
-
+					args.add( m_nerfDerivativeIteration++ );
+					
 					int gridDim = div_round_up( nItems, 64 );
 					m_forwardShader->launch( "nerfDerivative", args, gridDim, 1, 1, 64, 1, 1, stream );
 				}
@@ -1016,6 +1017,7 @@ namespace rpml
 		std::unique_ptr<Buffer> m_adamBuffer;
 
 		int m_iteration = 0;
-		int m_scrubmleIndexTrain = 0;
+		int m_nerfRaysIteration = 0;
+		int m_nerfDerivativeIteration = 0;
 	};
 }
