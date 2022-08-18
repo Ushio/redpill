@@ -1400,6 +1400,8 @@ extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, floa
     float3 oColor = make_float3( 0.0f, 0.0f, 0.0f );
     float T = 1.0f;
     const float Teps = 1e-4f;
+
+    float3 background = pcg3df( make_uint3( x, iteration, 9813392 ) );
     
     int eval_beg = rays[x].eval_beg;
     int eval_end = rays[x].eval_end;
@@ -1423,10 +1425,18 @@ extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, floa
             break;
     }
 
+    oColor += T * background;
+
     T = 1.0f; // important!!!! 
 
     // mse derivative
-    float3 refColor = make_float3( refs[x].color[0], refs[x].color[1], refs[x].color[2] );
+    // float3 refColor = make_float3( refs[x].color[0], refs[x].color[1], refs[x].color[2] );
+    float3 refColor = lerp(
+        background,
+        make_float3( refs[x].color[0], refs[x].color[1], refs[x].color[2] ), 
+        refs[x].color[3]
+    );
+
     float3 dColor = oColor - refColor;
 
     // backward
