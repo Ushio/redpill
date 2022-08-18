@@ -1437,7 +1437,15 @@ extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, floa
         refs[x].color[3]
     );
 
-    float3 dColor = oColor - refColor;
+    // L2 Loss
+    // float3 dColor = oColor - refColor;
+
+    // Huber Loss
+	float delta = 0.05;
+    float3 dColor = make_float3(
+		huber_loss( oColor.x, refColor.x, delta ),
+		huber_loss( oColor.y, refColor.y, delta ),
+		huber_loss( oColor.z, refColor.z, delta ) );
 
     // backward
     float3 oColor2 = make_float3( 0.0f, 0.0f, 0.0f );

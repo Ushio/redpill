@@ -314,6 +314,12 @@ namespace rpml
 		return L * F;
 	}
 
+	DEVICE_INLINE float huber_loss( float y, float y_ref, float delta ) 
+	{
+		float d = y - y_ref;
+		return fabs( d ) < delta ? d : copysignf( delta, d );
+	}
+
 	const int NERF_DENSITY_LAYER_BEG = 0;
 	const int NERF_DENSITY_LAYER_END = 2;
 	const int NERF_COLOR_LAYER_BEG = 2;
