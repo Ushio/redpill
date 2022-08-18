@@ -171,17 +171,44 @@ public:
 			glm::mat4 transform = glm::translate( glm::identity<glm::mat4>(), translation ) * glm::mat4_cast( rotation );
 			transform = glm::inverse( transform );
 
-			// 
+			// // x -> y -> z
 			glm::mat4 adjustmentMatrix = glm::identity<glm::mat4>();
 
-			adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.457007, 0.256999, 0.704056 } );
+			// colmap 1
+			//adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.457007, 0.256999, 0.704056 } );
+			//
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -356.442f ), { 0, 0, 1 } ); // Z
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 75.0906f ), { 0, 1, 0 } ); // Y
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -208.556f ), { 1, 0, 0 } ); // X
 
-			// x -> y -> z
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -356.442f ), { 0, 0, 1 } );
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 75.0906f ), { 0, 1, 0 } );
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -208.556f ), { 1, 0, 0 } );
+			//adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.0779408f, 0.0779408f, 0.0779408f } );
 
-			adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.0779408f, 0.0779408f, 0.0779408f } );
+			// photo2
+			//adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.544898, 0.235644, 0.504756 } );
+
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -2.50956f ), { 0, 0, 1 } ); // Z
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -30.7834f ), { 0, 1, 0 } ); // Y
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 151.98f ), { 1, 0, 0 } );	// X
+
+			//adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.055832, 0.055832, 0.055832 } );
+
+			// photo3
+			//adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.580989, 0.408583, 0.465466 } );
+
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -0.258414f ), { 0, 0, 1 } ); // Z
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 65.5499f ), { 0, 1, 0 } );	// Y
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 144.194f ), { 1, 0, 0 } );	 // X
+
+			//adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.0516109, 0.0516109, 0.0516109 } );
+
+
+			adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.659591, 0.72655, 0.49641 } );
+
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -0.258414f ), { 0, 0, 1 } ); // Z
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 65.5499f ), { 0, 1, 0 } );	 // Y
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 144.194f ), { 1, 0, 0 } );	 // X
+
+			adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.108665, 0.108665, 0.108665 } );
 
 			camera.transform = adjustmentMatrix * transform;
 			camera.intrinsicParam = intrinsics[intrinsicIndex];
@@ -267,49 +294,52 @@ int main()
 	printf( "GPU: %s\n", props.name );
 
 	ColmapCamera colmap;
-	colmap.load( pr::GetDataPath( "nerf/colmap" ).c_str() );
+	// colmap.load( pr::GetDataPath( "nerf/colmap" ).c_str() );
+	// colmap.load( pr::GetDataPath( "nerf/photo2" ).c_str() );
+	//colmap.load( pr::GetDataPath( "nerf/photo3" ).c_str() );
 
 	NeRFg nerfg( pr::GetDataPath( "kernels" ) );
 	std::vector<NerfCamera> cameras;
 
 	// for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )
 
-	//for( auto filePath : { "nerf/transforms_train.json" } )
-	//{
-	//	std::ifstream ifs( GetDataPath( filePath ) );
-	//	nlohmann::json j;
-	//	ifs >> j;
+#if 1
+	for( auto filePath : { "nerf/transforms_train.json" } )
+	{
+		std::ifstream ifs( GetDataPath( filePath ) );
+		nlohmann::json j;
+		ifs >> j;
 
-	//	nlohmann::json camera_angle_x = j["camera_angle_x"];
-	//	float fovy = camera_angle_x.get<float>();
+		nlohmann::json camera_angle_x = j["camera_angle_x"];
+		float fovy = camera_angle_x.get<float>();
 
-	//	nlohmann::json frames = j["frames"];
+		nlohmann::json frames = j["frames"];
 
-	//	std::mutex mu;
-	//	pr::ParallelFor( frames.size(), [&]( int i ) {
-	//		nlohmann::json camera = frames[i];
-	//		glm::mat4 m = loadMatrix( camera["transform_matrix"] );
+		std::mutex mu;
+		pr::ParallelFor( frames.size(), [&]( int i ) {
+			nlohmann::json camera = frames[i];
+			glm::mat4 m = loadMatrix( camera["transform_matrix"] );
 
-	//		glm::mat4 rot = glm::rotate( glm::identity<glm::mat4>(), glm::radians( -90.0f ), glm::vec3( 1, 0, 0 ) );
-	//		glm::mat4 s = glm::scale( glm::identity<glm::mat4>(), glm::vec3( 0.4f, 0.4f, 0.4f ) );
-	//		glm::mat4 t = glm::translate( glm::identity<glm::mat4>(), glm::vec3( 0.5f, 0.5f, 0.5f ) );
-	//		m = t * s * rot * m;
+			glm::mat4 rot = glm::rotate( glm::identity<glm::mat4>(), glm::radians( -90.0f ), glm::vec3( 1, 0, 0 ) );
+			glm::mat4 s = glm::scale( glm::identity<glm::mat4>(), glm::vec3( 0.4f, 0.4f, 0.4f ) );
+			glm::mat4 t = glm::translate( glm::identity<glm::mat4>(), glm::vec3( 0.5f, 0.5f, 0.5f ) );
+			m = t * s * rot * m;
 
-	//		NerfCamera nc = {};
-	//		nc.fovy = fovy;
-	//		nc.transform = m;
-	//		nc.path = camera["file_path"].get<std::string>();
+			NerfCamera nc = {};
+			nc.fovy = fovy;
+			nc.transform = m;
+			nc.path = camera["file_path"].get<std::string>();
 
-	//		std::string file = JoinPath( GetDataPath( "nerf" ), nc.path ) + ".png";
-	//		Result r = nc.image.load( file.c_str() );
-	//		PR_ASSERT( r == Result::Sucess, "" );
-	//		// printf( "%d %d\n", nc.image.width(), nc.image.height() );
+			std::string file = JoinPath( GetDataPath( "nerf" ), nc.path ) + ".png";
+			Result r = nc.image.load( file.c_str() );
+			PR_ASSERT( r == Result::Sucess, "" );
+			// printf( "%d %d\n", nc.image.width(), nc.image.height() );
 
-	//		std::lock_guard<std::mutex> lc( mu );
-	//		cameras.push_back( nc );
-	//	} );
-	//}
-
+			std::lock_guard<std::mutex> lc( mu );
+			cameras.push_back( nc );
+		} );
+	}
+#endif
 
 	float scale = 0.5f;
 	const int n_rays_per_batch = 4096;
@@ -571,7 +601,7 @@ int main()
 			for( int i = 0; i < n_rays_per_batch; ++i )
 			{
 				// LEGO 
-#if 0
+#if 1
 				int camIdx = rng.drawUInt() % cameras.size();
 				const NerfCamera& nc = cameras[camIdx];
 
@@ -616,7 +646,7 @@ int main()
 				glm::uvec4 color = nc.image( x, y );
 #endif
 
-#if 1
+#if 0
 				int camIdx = rng.drawUInt() % colmap.numberOfCamera();
 				glm::u8vec4 color;
 				glm::vec3 ro;
@@ -906,6 +936,63 @@ int main()
 			Image2DRGBA8 img;
 			CaptureScreen( &img );
 			img.saveAsPng( "c.png" );
+		}
+
+		if( ImGui::Button( "Save Ref View" ) )
+		{
+			static std::vector<NeRFInput> nerf_in;
+			static std::vector<NeRFOutput> nerf_out;
+			nerf_in.clear();
+
+			int cameraIndex = 0;
+			const ColmapCamera::Camera& theCamera = colmap.m_cameras[cameraIndex];
+			image.allocate( theCamera.image.width(), theCamera.image.height() );
+			for( int y = 0; y < theCamera.image.height(); ++y )
+			{
+				for( int x = 0; x < theCamera.image.width(); ++x )
+				{
+					glm::u8vec4 color;
+					glm::vec3 ro;
+					glm::vec3 rd;
+					colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, cameraIndex, (float)x / theCamera.image.width(), (float)y / theCamera.image.height() );
+					rd = glm::normalize( rd );
+
+					NeRFInput input;
+					input.ro[0] = ro.x;
+					input.ro[1] = ro.y;
+					input.ro[2] = ro.z;
+					input.rd[0] = rd.x;
+					input.rd[1] = rd.y;
+					input.rd[2] = rd.z;
+					nerf_in.push_back( input );
+				}
+			}
+
+			nerf_out.resize( nerf_in.size() );
+			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
+
+			int it = 0;
+			for( int y = 0; y < image.height(); ++y )
+			{
+				for( int x = 0; x < image.width(); ++x )
+				{
+					NeRFOutput o = nerf_out[it++];
+					float r = glm::clamp( o.color[0], 0.0f, 1.0f );
+					float g = glm::clamp( o.color[1], 0.0f, 1.0f );
+					float b = glm::clamp( o.color[2], 0.0f, 1.0f );
+
+					glm::u8vec4 color;
+					color.r = r * 255.0f;
+					color.g = g * 255.0f;
+					color.b = b * 255.0f;
+					color.a = 255;
+					image( x, y ) = color;
+				}
+			}
+
+			char output[256];
+			sprintf( output, "refView%04d.png", cameraIndex );
+			image.saveAsPng( output );
 		}
 
 		ImGui::InputFloat( "guide box x", &guidebox_x, 0.1f );
