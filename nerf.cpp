@@ -15,6 +15,7 @@ using namespace rpml;
 #include <json.hpp>
 
 #define LINEAR_SPACE_LEARNING 0
+#define INSTANT_NGP_SCENE 1
 
 struct NerfCamera
 {
@@ -294,16 +295,18 @@ int main()
 	printf( "GPU: %s\n", props.name );
 
 	ColmapCamera colmap;
+#if INSTANT_NGP_SCENE == 0
 	// colmap.load( pr::GetDataPath( "nerf/colmap" ).c_str() );
 	// colmap.load( pr::GetDataPath( "nerf/photo2" ).c_str() );
-	//colmap.load( pr::GetDataPath( "nerf/photo3" ).c_str() );
+	colmap.load( pr::GetDataPath( "nerf/photo3" ).c_str() );
+#endif
 
 	NeRFg nerfg( pr::GetDataPath( "kernels" ) );
 	std::vector<NerfCamera> cameras;
 
 	// for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )
 
-#if 1
+#if INSTANT_NGP_SCENE
 	for( auto filePath : { "nerf/transforms_train.json" } )
 	{
 		std::ifstream ifs( GetDataPath( filePath ) );
@@ -600,8 +603,7 @@ int main()
 
 			for( int i = 0; i < n_rays_per_batch; ++i )
 			{
-				// LEGO 
-#if 1
+#if INSTANT_NGP_SCENE
 				int camIdx = rng.drawUInt() % cameras.size();
 				const NerfCamera& nc = cameras[camIdx];
 
@@ -644,9 +646,7 @@ int main()
 				input.rd[2] = rd.z;
 				inputs.push_back( input );
 				glm::uvec4 color = nc.image( x, y );
-#endif
-
-#if 0
+#else
 				int camIdx = rng.drawUInt() % colmap.numberOfCamera();
 				glm::u8vec4 color;
 				glm::vec3 ro;
