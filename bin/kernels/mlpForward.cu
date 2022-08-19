@@ -552,9 +552,36 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 
         int nSteps = 0;
         int nEvals = 0;
-        float dt = sqrt( 3.0f ) / MLP_STEP;
-        // float bias = dt * 0.5f;
-        float bias = dt * hash1( scrubmleIndex * 0xFFFF + x );
+
+#if SAMPLING_DISTANCE_PROPORTIONAL
+		float a = sqrt( 3.0f );
+		float bias = pcg3df( make_uint3( x, scrubmleIndex, 12832 ) ).x;
+		for( int i = 0; i < MLP_STEP; ++i )
+		{
+			float x0 = (float)( i + bias ) / ( MLP_STEP - 1 );
+			float x1 = (float)( i + bias + 1 ) / ( MLP_STEP - 1 );
+			float d0 = a * x0 * x0;
+			float d1 = a * x1 * x1;
+			float dt = d1 - d0;
+			float3 p = ro + rd * ( h.x + d0 );
+
+			if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
+			{
+				break;
+			}
+			p.x = fclamp( p.x, 0.0f, 1.0f );
+			p.y = fclamp( p.y, 0.0f, 1.0f );
+			p.z = fclamp( p.z, 0.0f, 1.0f );
+
+			if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
+			{
+				nEvals++;
+			}
+			nSteps++;
+		}
+#else
+		float dt = MLP_CONSTANT_STEP_SIZE;
+		float bias = dt * pcg3df( make_uint3( x, scrubmleIndex, 12832 ) ).x;
         for( int i = 0 ; i < MLP_STEP ; ++i )
         {
             float3 p = ro + rd * ( h.x + bias + dt * i );
@@ -573,12 +600,45 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
             }
             nSteps++;
         }
+#endif
 
         int eval_beg = atomicAdd( &nerfSamples->m_row, nEvals );
         int eval_end = eval_beg + nEvals;
         rays[x].eval_beg = eval_beg;
         rays[x].eval_end = eval_end;
 
+#if SAMPLING_DISTANCE_PROPORTIONAL
+		int i_sample = 0;
+		for( int i = 0; i < nSteps; ++i )
+		{
+			float x0 = (float)( i + bias ) / ( MLP_STEP - 1 );
+			float x1 = (float)( i + bias + 1 ) / ( MLP_STEP - 1 );
+			float d0 = a * x0 * x0;
+			float d1 = a * x1 * x1;
+			float dt = d1 - d0;
+			float3 p = ro + rd * ( h.x + d0 );
+
+			if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
+			{
+				break;
+			}
+			p.x = fclamp( p.x, 0.0f, 1.0f );
+			p.y = fclamp( p.y, 0.0f, 1.0f );
+			p.z = fclamp( p.z, 0.0f, 1.0f );
+
+			if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
+			{
+				intermediates[elem( 0, eval_beg + i_sample, outputMat )] = p.x;
+				intermediates[elem( 1, eval_beg + i_sample, outputMat )] = p.y;
+				intermediates[elem( 2, eval_beg + i_sample, outputMat )] = p.z;
+				intermediates[elem( 3, eval_beg + i_sample, outputMat )] = dt;
+				intermediates[elem( 0, eval_beg + i_sample, dirMat )] = rd.x;
+				intermediates[elem( 1, eval_beg + i_sample, dirMat )] = rd.y;
+				intermediates[elem( 2, eval_beg + i_sample, dirMat )] = rd.z;
+				i_sample++;
+			}
+		}
+#else
         int i_sample = 0;
         for( int i = 0 ; i < nSteps ; ++i )
         {
@@ -596,13 +656,15 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
             {
                 intermediates[elem( 0, eval_beg + i_sample, outputMat )] = p.x;
                 intermediates[elem( 1, eval_beg + i_sample, outputMat )] = p.y;
-                intermediates[elem( 2, eval_beg + i_sample, outputMat )] = p.z;
+				intermediates[elem( 2, eval_beg + i_sample, outputMat )] = p.z;
+				intermediates[elem( 3, eval_beg + i_sample, outputMat )] = dt;
                 intermediates[elem( 0, eval_beg + i_sample, dirMat )] = rd.x;
                 intermediates[elem( 1, eval_beg + i_sample, dirMat )] = rd.y;
                 intermediates[elem( 2, eval_beg + i_sample, dirMat )] = rd.z;
                 i_sample++;
             }
         }
+#endif
     }
     else
     {
@@ -1073,15 +1135,13 @@ extern "C" __global__ void avg( float* occupancyGrid, float* occupancyAverage )
 		atomicAdd( occupancyAverage, density / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES ) );
 	}
 }
-extern "C" __global__ void nerfEval( NeRFRay *rays, NeRFOutput* outputs, float* intermediates, GPUMat nerfSamples, int nElement ) 
+extern "C" __global__ void nerfEval( NeRFRay* rays, NeRFOutput* outputs, float* intermediates, GPUMat nerfInput, GPUMat nerfSamples, int nElement )
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if( nElement <= x )
     {
         return;
     }
-    const float dt = sqrt( 3.0f ) / MLP_STEP;
-
     float3 oColor = make_float3( 0.0f, 0.0f, 0.0f );
     float T = 1.0f;
     const float Teps = 1e-4f;
@@ -1090,6 +1150,7 @@ extern "C" __global__ void nerfEval( NeRFRay *rays, NeRFOutput* outputs, float* 
     int eval_end = rays[x].eval_end;
     for( int yi = eval_beg; yi < eval_end; yi++ )
     {
+		float dt = intermediates[elem( 3, yi, nerfInput )];
         float density = intermediates[elem( 3, yi, nerfSamples )];
         float sigma = nerfDensityActivation( density );
 
@@ -1386,7 +1447,7 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
     }
 }
 
-extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, float* intermediates, GPUMat nerfSamples, int nElement, int iteration )
+extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, float* intermediates, GPUMat nerfInput, GPUMat nerfSamples, int nElement, int iteration )
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if( nElement <= x )
@@ -1395,8 +1456,6 @@ extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, floa
     }
 
     // forward
-    const float dt = sqrt( 3.0f ) / MLP_STEP;
-
     float3 oColor = make_float3( 0.0f, 0.0f, 0.0f );
     float T = 1.0f;
     const float Teps = 1e-4f;
@@ -1407,6 +1466,7 @@ extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, floa
     int eval_end = rays[x].eval_end;
     for( int yi = eval_beg; yi < eval_end; yi++ )
     {
+		float dt = intermediates[elem( 3, yi, nerfInput )];
         float density = intermediates[elem( 3, yi, nerfSamples )];
         float sigma = nerfDensityActivation( density );
 
@@ -1452,6 +1512,7 @@ extern "C" __global__ void nerfDerivative( NeRFRay* rays, NeRFOutput* refs, floa
     int tail_yi = eval_end;
     for( int yi = eval_beg; yi < eval_end; yi++ )
     {
+		float dt = intermediates[elem( 3, yi, nerfInput )];
         float density = intermediates[elem( 3, yi, nerfSamples )];
         float sigma = nerfDensityActivation( density );
         float3 c = make_float3(

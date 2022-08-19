@@ -203,13 +203,22 @@ public:
 			//adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.0516109, 0.0516109, 0.0516109 } );
 
 
-			adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.659591, 0.72655, 0.49641 } );
+			//adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.659591, 0.72655, 0.49641 } );
 
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -0.258414f ), { 0, 0, 1 } ); // Z
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 65.5499f ), { 0, 1, 0 } );	 // Y
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 144.194f ), { 1, 0, 0 } );	 // X
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( -0.258414f ), { 0, 0, 1 } ); // Z
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 65.5499f ), { 0, 1, 0 } );	 // Y
+			//adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 144.194f ), { 1, 0, 0 } );	 // X
 
-			adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.108665, 0.108665, 0.108665 } );
+			//adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.108665, 0.108665, 0.108665 } );
+
+			// Photo 4
+			adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.467639, 0.248784, 0.570989 } );
+
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 0.0f ), { 0, 0, 1 } );// Z
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 0.0f ), { 0, 1, 0 } );// Y
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 137.306f ), { 1, 0, 0 } );// X
+
+			adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.0338603, 0.0338603, 0.0338603 } );
 
 			camera.transform = adjustmentMatrix * transform;
 			camera.intrinsicParam = intrinsics[intrinsicIndex];
@@ -233,6 +242,7 @@ public:
 	}
 
 	// note: nearClip, farClip is scaled by the transform
+	// todo remove near clip
 	void sample( glm::u8vec4* colorOut, glm::vec3* roOut, glm::vec3* rdOut, float nearClip, float farClip, int cameraIndex, float x0, float x1 )
 	{
 		const Camera& camera = m_cameras[cameraIndex];
@@ -298,7 +308,9 @@ int main()
 #if INSTANT_NGP_SCENE == 0
 	// colmap.load( pr::GetDataPath( "nerf/colmap" ).c_str() );
 	// colmap.load( pr::GetDataPath( "nerf/photo2" ).c_str() );
-	colmap.load( pr::GetDataPath( "nerf/photo3" ).c_str() );
+	// colmap.load( pr::GetDataPath( "nerf/photo3" ).c_str() );
+	// colmap.load( pr::GetDataPath( "nerf/photo3_ngp" ).c_str() );
+	colmap.load( pr::GetDataPath( "nerf/photo4" ).c_str() );
 #endif
 
 	NeRFg nerfg( pr::GetDataPath( "kernels" ) );
@@ -547,6 +559,8 @@ int main()
 
 	int _stride = 8;
 
+	Stopwatch globalSw;
+
 	while( pr::NextFrame() == false )
 	{
 		if( IsImGuiUsingMouse() == false )
@@ -573,13 +587,13 @@ int main()
 			glm::u8vec4 color;
 			glm::vec3 ro;
 			glm::vec3 rd;
-			colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, i, 0.0f, 0.0f );
+			colmap.sample( &color, &ro, &rd, 0.0001f, 1.0f, i, 0.0f, 0.0f );
 			DrawLine( ro, ro + rd, { 128, 128, 128 } );
 			colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, i, 1.0f, 0.0f );
 			DrawLine( ro, ro + rd, { 128, 128, 128 } );
-			colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, i, 0.0f, 1.0f );
+			colmap.sample( &color, &ro, &rd, 0.0001f, 1.0f, i, 0.0f, 1.0f );
 			DrawLine( ro, ro + rd, { 128, 128, 128 } );
-			colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, i, 1.0f, 1.0f );
+			colmap.sample( &color, &ro, &rd, 0.0001f, 1.0f, i, 1.0f, 1.0f );
 			DrawLine( ro, ro + rd, { 128, 128, 128 } );
 		}
 
@@ -593,6 +607,7 @@ int main()
 
 		static int iterations = 0; 
 
+		//if( iterations < 512 )
 		if( isLearning )
 		for(int k = 0 ; k < 16 ; ++k)
 		{
@@ -651,7 +666,7 @@ int main()
 				glm::u8vec4 color;
 				glm::vec3 ro;
 				glm::vec3 rd;
-				colmap.sample( &color, &ro, &rd, 0.1f, 1.0f, camIdx, rng.draw(), rng.draw() );
+				colmap.sample( &color, &ro, &rd, 0.0001f, 1.0f, camIdx, rng.draw(), rng.draw() );
 				rd = glm::normalize( rd );
 
 				NeRFInput input;
@@ -744,6 +759,38 @@ int main()
 		bg->upload( image );
 
 #endif
+
+		// learning test
+		//{
+		//	Xoshiro128StarStar random;
+		//	for(int i = 0 ; i < 10 ; ++i)
+		//	{
+		//		int camIdx = random.uniformi() % colmap.numberOfCamera();
+		//		glm::u8vec4 color;
+		//		glm::vec3 ro;
+		//		glm::vec3 rd;
+		//		colmap.sample( &color, &ro, &rd, 0.1f, 1.0f, camIdx, random.uniformf(), random.uniformf() );
+		//		rd = glm::normalize( rd );
+
+		//		//float dt = sqrt( 3.0f ) / MLP_STEP;
+		//		//PrimBegin( pr::PrimitiveMode::Points, 1 );
+		//		//for(int j = 0 ; j < MLP_STEP ; ++j)
+		//		//{
+		//		//	PrimVertex( ro + rd * ( dt * j ), { 255, 0, 0 } );
+		//		//}
+		//		//PrimEnd();
+
+		//		float t = 0.0f;
+		//		float dt = sqrt( 3.0f ) / MLP_STEP;
+		//		PrimBegin( pr::PrimitiveMode::Points, 1 );
+		//		for( int j = 0; j < MLP_STEP; ++j )
+		//		{
+		//			PrimVertex( ro + rd * ( dt * j ), { 255, 0, 0 } );
+		//		}
+		//		PrimEnd();
+		//	}
+		//}
+
 		//static int iterations = 0;
 		//if( iterations++ > 32 )
 		//{
@@ -883,7 +930,7 @@ int main()
 
 		ImGui::SetNextWindowSize( { 600, 200 }, ImGuiCond_Once );
 		ImGui::Begin( "Panel" );
-		ImGui::Text( "loss %.6f", loss / inputs.size() );
+		ImGui::Text( "loss %.6f, time %f s", loss / inputs.size(), globalSw.elapsed() );
 
 		ImGui::Text( "iterations %d", iterations );
 		ImGui::Checkbox( "isLearning", &isLearning );
@@ -954,7 +1001,7 @@ int main()
 					glm::u8vec4 color;
 					glm::vec3 ro;
 					glm::vec3 rd;
-					colmap.sample( &color, &ro, &rd, 0.01f, 1.0f, cameraIndex, (float)x / theCamera.image.width(), (float)y / theCamera.image.height() );
+					colmap.sample( &color, &ro, &rd, 0.0001f, 1.0f, cameraIndex, (float)x / theCamera.image.width(), (float)y / theCamera.image.height() );
 					rd = glm::normalize( rd );
 
 					NeRFInput input;

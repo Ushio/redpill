@@ -37,6 +37,8 @@ typedef unsigned int uint32_t;
 
 #define NERF_AVG_BATCH 128
 
+#define SAMPLING_DISTANCE_PROPORTIONAL 1
+
 namespace rpml
 {
 	const int GPU_MAT_ALIGNMENT = 8;
@@ -325,6 +327,7 @@ namespace rpml
 	const int NERF_COLOR_LAYER_BEG = 2;
 	const int NERF_COLOR_LAYER_END = 5;
 	const int MLP_STEP = 1024;
+	const float MLP_CONSTANT_STEP_SIZE = 1.73205080756887729353f /*sqrt(3)*/ / MLP_STEP;
 
 	const int NERF_OCCUPANCY_GRID_MIN_RES = 128;
 	const int NERF_OCCUPANCY_GRID_T = NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES;

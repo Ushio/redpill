@@ -679,7 +679,7 @@ namespace rpml
 				int maxRow = nItems * MLP_STEP;
 
 				int location = 0;
-				GPUMat inputGPU = allocateGPUMat( &location, maxRow, 3 );
+				GPUMat inputGPU = allocateGPUMat( &location, maxRow, 4 ); // XYZ + delta T
 				GPUMat outputGPU = allocateGPUMat( &location, maxRow, 4 ); // RGB + density
 				GPUMat dirGPU = allocateGPUMat( &location, maxRow, 3 );
 
@@ -776,6 +776,7 @@ namespace rpml
 					args.add( m_rayBuffer->data() );
 					args.add( m_nerfOutputBuffer->data() );
 					args.add( m_intermediateBuffer->data() );
+					args.add( inputGPU );
 					args.add( outputGPU );
 					args.add( nItems );
 					args.add( m_nerfDerivativeIteration++ );
@@ -915,7 +916,7 @@ namespace rpml
 
 				int maxRow = nItems * MLP_STEP;
 				int location = 0;
-				GPUMat inputGPU  = allocateGPUMat( &location, maxRow, 3 );
+				GPUMat inputGPU  = allocateGPUMat( &location, maxRow, 4 ); // XYZ + delta T
 				GPUMat outputGPU = allocateGPUMat( &location, maxRow, 4 ); // RGB + density
 				GPUMat dirGPU    = allocateGPUMat( &location, maxRow, 3 );
 				if( !m_intermediateBuffer || m_intermediateBuffer->bytes() < location * sizeof( float ) )
@@ -979,6 +980,7 @@ namespace rpml
 					args.add( m_rayBuffer->data() );
 					args.add( m_nerfOutputBuffer->data() );
 					args.add( m_intermediateBuffer->data() );
+					args.add( inputGPU );
 					args.add( outputGPU );
 					args.add( nItems );
 					// printf( "r %d\n", outputGPU.m_row );
