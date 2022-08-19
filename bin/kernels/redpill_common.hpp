@@ -235,10 +235,18 @@ namespace rpml
 	{
 		if( ( y % 4 ) == 0 )
 		{
+#if IS_HOST
 			for( int i = 0; i < 4; i++ )
 			{
 				vals[i] = matBuffer[elem( x, y + i, m )];
 			}
+#else
+			float4 vec = *(float4*)&matBuffer[elem( x, y, m )];
+			vals[0] = vec.x;
+			vals[1] = vec.y;
+			vals[2] = vec.z;
+			vals[3] = vec.w;
+#endif
 		}
 		return vals[y % 4];
 	}
