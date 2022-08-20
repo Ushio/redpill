@@ -137,7 +137,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
 
                 // store intermediates
                 int yi = yi_global_base + yi_local;
-				float intermediate = yi < arg.inputMat.m_row ? value[yi_local] : 0.0f;
+				float intermediate = yi < arg.inputMat.m_row ? feature : 0.0f;
 				intermediates[elem( xi, yi, arg.m_Is[0] )] = intermediate;
             }
         }
@@ -1214,7 +1214,7 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
                 setTensor( tensor, xi, yi_local, feature );
                 
                 int yi = yi_global_base + yi_local;
-				float intermediate = yi < arg.inputMat.m_row ? value[yi_local] : 0.0f;
+				float intermediate = yi < arg.inputMat.m_row ? feature : 0.0f;
 				intermediates[elem( xi, yi, arg.m_Is[0] )] = intermediate;
             }
         }
