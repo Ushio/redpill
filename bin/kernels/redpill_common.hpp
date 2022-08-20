@@ -539,4 +539,28 @@ namespace rpml
 		uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
 		return avg < occupancyGrid[index];
 	}
+
+	DEVICE_INLINE float srgbLinear2Gamma( float c )
+	{
+		if( c < 0.0031308f )
+		{
+			return c * 12.92f;
+		}
+		return INTRIN_POWF( c * 1.055f, 1.0f / 2.4f ) - 0.055f;
+	}
+
+	DEVICE_INLINE void adobeRGB2sRGB( float* outR, float* outG, float* outB, float r, float g, float b, float linearScaling )
+	{
+		r = INTRIN_POWF( r, 563.0f / 256.0f );
+		g = INTRIN_POWF( g, 563.0f / 256.0f );
+		b = INTRIN_POWF( b, 563.0f / 256.0f );
+
+		float lr = 1.39821f * r - 0.3998298f * g - 0.000039774f * b;
+		float lg = 0.000136554f * r + 0.999946f * g - 0.000006455f * b;
+		float lb = 0.000033869f * r - 0.0429264f * g + 1.04297f * b;
+
+		*outR = srgbLinear2Gamma( lr * linearScaling );
+		*outG = srgbLinear2Gamma( lg * linearScaling );
+		*outB = srgbLinear2Gamma( lb * linearScaling );
+	}
 }

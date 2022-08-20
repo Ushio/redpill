@@ -495,7 +495,7 @@ int main()
 		}
 
 		nerf_out.resize( nerf_in.size() );
-		nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
+		nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream, INSTANT_NGP_SCENE == 0 );
 
 		int it = 0;
 		for( int y = 0; y < image.height(); ++y )
@@ -730,7 +730,7 @@ int main()
 		}
 
 		nerf_out.resize( nerf_in.size() );
-		nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
+		nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream, INSTANT_NGP_SCENE == 0 );
 
 		int it = 0;
 		for( int y = 0; y < image.height(); ++y )
@@ -1016,7 +1016,7 @@ int main()
 			}
 
 			nerf_out.resize( nerf_in.size() );
-			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream );
+			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream, INSTANT_NGP_SCENE == 0 );
 
 			int it = 0;
 			for( int y = 0; y < image.height(); ++y )

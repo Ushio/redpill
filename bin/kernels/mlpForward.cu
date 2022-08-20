@@ -1115,7 +1115,7 @@ extern "C" __global__ void avg( float* occupancyGrid, float* occupancyAverage )
 		atomicAdd( occupancyAverage, density / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES ) );
 	}
 }
-extern "C" __global__ void nerfEval( NeRFRay* rays, NeRFOutput* outputs, float* intermediates, GPUMat nerfInput, GPUMat nerfSamples, int nElement )
+extern "C" __global__ void nerfEval( NeRFRay* rays, NeRFOutput* outputs, float* intermediates, GPUMat nerfInput, GPUMat nerfSamples, int nElement, int colorspaceCvt_adobeRGB2sRGB )
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     if( nElement <= x )
@@ -1149,9 +1149,16 @@ extern "C" __global__ void nerfEval( NeRFRay* rays, NeRFOutput* outputs, float* 
             break;
     }
 
-    outputs[x].color[0] = oColor.x;
-    outputs[x].color[1] = oColor.y;
-    outputs[x].color[2] = oColor.z;
+    if( colorspaceCvt_adobeRGB2sRGB )
+	{
+	    adobeRGB2sRGB( &outputs[x].color[0], &outputs[x].color[1], &outputs[x].color[2], oColor.x, oColor.y, oColor.z, 1.06f );
+	}
+	else
+	{
+        outputs[x].color[0] = oColor.x;
+        outputs[x].color[1] = oColor.y;
+        outputs[x].color[2] = oColor.z;
+    }
 }
 
 extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuffer, NeRFTrainArg arg ) 

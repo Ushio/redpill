@@ -889,7 +889,7 @@ namespace rpml
 			oroError e = oroStreamSynchronize( stream );
 			return 0.0f;
 		}
-		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement, oroStream stream )
+		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement, oroStream stream, int colorspaceCvt_adobeRGB2sRGB )
 		{
 			int blockSize = 16384;
 			int nIter = div_round_up( nElement, blockSize );
@@ -983,6 +983,7 @@ namespace rpml
 					args.add( inputGPU );
 					args.add( outputGPU );
 					args.add( nItems );
+					args.add( colorspaceCvt_adobeRGB2sRGB );
 					// printf( "r %d\n", outputGPU.m_row );
 
 					int gridDim = div_round_up( nItems, 64 );
