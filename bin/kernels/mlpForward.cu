@@ -841,36 +841,22 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
 
         }
 
-        // density
-        if( i + 1 == NERF_DENSITY_LAYER_END && xi == 0 )
-        {
-            for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
-            {
-                float density = value[yi_local];
-                int yi = yi_global_base + yi_local;
-                if( yi < arg.outputMat.m_row )
-                {
-                    intermediates[ elem( 3, yi, arg.outputMat )] = density;
-                }
-            }
-        }
-
         __syncthreads();
     }
 
-    // // density
-    // if( xi == 0 )
-    // {
-    //     for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
-    //     {
-    //         float density = value[yi_local];
-    //         int yi = yi_global_base + yi_local;
-    //         if( yi < arg.outputMat.m_row )
-    //         {
-    //             intermediates[ elem( 3, yi, arg.outputMat )] = density;
-    //         }
-    //     }
-    // }
+	// density
+	if( xi == 0 )
+	{
+		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			float density = value[yi_local];
+			int yi = yi_global_base + yi_local;
+			if( yi < arg.outputMat.m_row )
+			{
+				intermediates[elem( 3, yi, arg.outputMat )] = density;
+			}
+		}
+	}
 
 	// directional
 	int nItrEncode = div_round_up( SHARED_TENSOR_ROW, 64 );
