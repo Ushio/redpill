@@ -98,10 +98,8 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
             {
                 setTensor( tensor, xi, yi_local, value[yi_local] );
                 int yi = yi_global_base + yi_local;
-                if( yi < arg.inputMat.m_row )
-                {
-                    intermediates[elem( xi, yi, arg.m_Is[0] )] = value[yi_local];
-                }
+				float intermediate = yi < arg.inputMat.m_row ? value[yi_local] : 0.0f;
+				intermediates[elem( xi, yi, arg.m_Is[0] )] = intermediate;
             }
         }
         __syncthreads();
@@ -139,10 +137,8 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
 
                 // store intermediates
                 int yi = yi_global_base + yi_local;
-                if( yi < arg.inputMat.m_row )
-                {
-                    intermediates[elem( xi, yi, arg.m_Is[0] )] = value[yi_local];
-                }
+				float intermediate = yi < arg.inputMat.m_row ? value[yi_local] : 0.0f;
+				intermediates[elem( xi, yi, arg.m_Is[0] )] = intermediate;
             }
         }
         __syncthreads();
@@ -190,10 +186,8 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
 
                 // store intermediates
                 int yi = yi_global_base + yi_local;
-                if( yi < arg.inputMat.m_row )
-                {
-                    intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = value[yi_local];
-                }
+				float intermediate = yi < arg.inputMat.m_row ? value[yi_local] : 0.0f;
+				intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = intermediate;
             }
         }
         __syncthreads();
@@ -221,6 +215,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
         int yi = yi_global_base + yi_local;
         if( arg.inputMat.m_row <= yi )
         {
+            // This is a invalid data so that the derivative to propagate must be zero.
             d = 0.0f;
         }
         setTensor( tensor, xi, yi_local, d );
@@ -246,12 +241,9 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 if( i != arg.nLayer - 1 )
                 {
                     int yi = yi_global_base + yi_local;
-                    if( yi < arg.inputMat.m_row )
+                    if( intermediates[elem( xi, yi, arg.m_Is[i+1] )] == 0.0f )
                     {
-                        if( intermediates[elem( xi, yi, arg.m_Is[i+1] )] == 0.0f )
-                        {
-                            v = 0.0f;
-                        }
+                        v = 0.0f;
                     }
                 }
 
@@ -271,7 +263,6 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
 
         if( xi < col )
         {    
-
             // Weight derivative
             for( int yi_W = 0 ; yi_W < row ; yi_W++ )
             {
@@ -279,12 +270,14 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
                     int yi = yi_global_base + yi_local;
-                    if( yi < arg.inputMat.m_row )
-                    {
-                        float X = intermediates[elem( yi_W, yi, arg.m_Is[i] /* input Xs */ )];
-                        float Y = getTensor( tensor, xi, yi_local );
-                        dW = fma( X, Y, dW );
-                    }
+
+                    // remark: 
+                    // - yi < arg.inputMat.m_row condition makes nv execution 2x slower.
+                    // - skip yi < arg.inputMat.m_row condition as the propagated tensors and intermediates are zero if it is invalid
+
+                    float X = intermediates[elem( yi_W, yi, arg.m_Is[i] /* input Xs */ )];
+                    float Y = getTensor( tensor, xi, yi_local );
+                    dW = fma( X, Y, dW );
                 }
                 if( dW != 0.0f )
                 {
@@ -885,7 +878,7 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
 	{
 		int yi_local = i * 64 + xi;
 		int yi = yi_global_base + yi_local;
-		if( yi_local < SHARED_TENSOR_ROW )
+		if( yi_local < SHARED_TENSOR_ROW && yi < arg.outputMat.m_row )
 		{
 			float x = intermediates[elem( 0, yi, arg.dirMat )];
 			float y = intermediates[elem( 1, yi, arg.dirMat )];
@@ -1235,10 +1228,8 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
                 setTensor( tensor, xi, yi_local, feature );
                 
                 int yi = yi_global_base + yi_local;
-                if( yi < arg.inputMat.m_row )
-                {
-                    intermediates[elem( xi, yi, arg.m_Is[0] )] = value[yi_local];
-                }
+				float intermediate = yi < arg.inputMat.m_row ? value[yi_local] : 0.0f;
+				intermediates[elem( xi, yi, arg.m_Is[0] )] = intermediate;
             }
         }
         __syncthreads();
@@ -1288,10 +1279,8 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
                 
                 // store intermediates
                 int yi = yi_global_base + yi_local;
-                if( yi < arg.inputMat.m_row )
-                {
-                    intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = value[yi_local];
-                }
+				float intermediate = yi < arg.inputMat.m_row ? value[yi_local] : 0.0f;
+				intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = intermediate;
             }
 
             // derivative of activation
@@ -1350,11 +1339,8 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
 		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 		{
 			int yi = yi_global_base + yi_local;
-			if( yi < arg.inputMat.m_row )
-			{
-				float sh = getTensor( tensor, xi, yi_local );
-				intermediates[elem( xi, yi, arg.m_Is[NERF_COLOR_LAYER_BEG] )] = sh;
-			}
+			float intermediate = yi < arg.inputMat.m_row ? getTensor( tensor, xi, yi_local ) : 0.0f;
+			intermediates[elem( xi, yi, arg.m_Is[NERF_COLOR_LAYER_BEG] )] = intermediate;
 		}
 		// derivative of activation
 		intermediates[elem( xi, yi_global_base / SHARED_TENSOR_ROW, arg.m_DoAs[NERF_COLOR_LAYER_BEG] )] = __uint_as_float( 0xFFFFFFFF );
@@ -1404,10 +1390,8 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
                 
                 // store intermediates
                 int yi = yi_global_base + yi_local;
-                if( yi < arg.inputMat.m_row )
-                {
-                    intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = value[yi_local];
-                }
+				float intermediate = yi < arg.inputMat.m_row ? value[yi_local] : 0.0f;
+				intermediates[elem( xi, yi, arg.m_Is[i + 1] )] = intermediate;
             }
 
              // derivative of activation
@@ -1571,7 +1555,7 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
             }
             else
             {
-                vs[yi_local] = 0.0f;
+                vs[yi_local] = 0.0f; // This is a invalid data so that the derivative to propagate must be zero.
             }
         }
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
@@ -1631,11 +1615,6 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
 
         if( xi < col )
         {    
-   //         if( i == 2 )
-			//{
-			//	printf( "rc %d %d, %d %d\n", row, col, arg.m_Is[i].m_row, arg.m_Is[i].m_col );
-   //         }
-
             // Weight derivative
             float x4[4];
             float y4[4];
@@ -1644,15 +1623,14 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
                 float dW = 0.0f;
                 for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
                 {
+					// remark:
+					// - yi < arg.inputMat.m_row condition makes nv execution 2x slower.
+					// - skip yi < arg.inputMat.m_row condition as the propagated tensors and intermediates are zero if it is invalid
+
                     int yi = yi_global_base + yi_local;
-                    if( yi < arg.inputMat.m_row )
-                    {
-                        // float X = intermediates[elem( yi_W, yi, arg.m_Is[i] /* input Xs */ )];
-                        // float Y = getTensor( tensor, xi, yi_local );
-						float X = BSL4( intermediates, yi_W, yi, arg.m_Is[i] /* input Xs */, x4 );
-						float Y = getTensorBSL4( tensor, xi, yi_local, y4 );
-                        dW = fma( X, Y, dW );
-                    }
+					float X = BSL4( intermediates, yi_W, yi, arg.m_Is[i] /* input Xs */, x4 );
+					float Y = getTensorBSL4( tensor, xi, yi_local, y4 );
+                    dW = fma( X, Y, dW );
                 }
                 if( dW != 0.0f )
                 {
