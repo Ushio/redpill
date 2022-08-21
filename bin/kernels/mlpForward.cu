@@ -1,3 +1,4 @@
+#include "cuda_fp16.h"
 #include "redpill_common.hpp"
 #include "helper_math.h"
 
@@ -373,6 +374,16 @@ extern "C" __global__ void adamOptimize( float* matBuffer, float* dMatBuffer, Ad
             dMatBuffer[x] = 0.0f;
         }
     }
+}
+
+extern "C" __global__ void toFp16( __half* fp16, float* fp32, int n )
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	if( x < n )
+	{
+		fp16[x] = __float2half( fp32[x] );
+	}
+	// printf( " __CUDA_ARCH__ %d\n", __CUDA_ARCH__ );
 }
 
 extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPForwardArg arg ) 
@@ -1108,7 +1119,10 @@ extern "C" __global__ void avg( float* occupancyGrid, float* occupancyAverage )
 	}
 
     for( int i = 16; i >= 1; i /= 2 )
-		density += __shfl_xor( density, i, 32 );
+	{
+		// density += __shfl_xor_sync( 0xFFFFFFFF, density, i, 32 );
+	    density += __shfl_xor( density, i, 32 );
+	}
 
 	if( threadIdx.x == 0 )
 	{

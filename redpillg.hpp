@@ -5,6 +5,9 @@
 #include <queue>
 #include <memory>
 #include <intrin.h>
+
+#define ENABLE_FP16 0
+
 #define RPMLX_ASSERT( ExpectTrue ) \
 	if( ( ExpectTrue ) == 0 )     \
 	{                             \
@@ -117,6 +120,7 @@ namespace rpml
 			std::vector<std::string> options;
 			options.push_back( "-std=c++11");
 
+			// options.push_back( "--gpu-architecture=compute_70" );
 			for( int i = 0; i < includeDirs.size(); ++i )
 			{
 				options.push_back( "-I " + includeDirs[i] );
@@ -124,7 +128,9 @@ namespace rpml
 
 			if( compileMode == CompileMode::RelwithDebInfo )
 			{
-				options.push_back( "-G" );
+				//options.push_back( "-G" );
+				options.push_back( "--generate-line-info" );
+				
 			}
 
 			for( int i = 0; i < extraArgs.size(); ++i )
@@ -257,6 +263,9 @@ namespace rpml
 			}
 
 			m_matBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
+#if ENABLE_FP16
+			m_matBufferFp16 = std::unique_ptr<Buffer>( new Buffer( location * sizeof( uint16_t ) ) );
+#endif
 			m_dmatBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			m_adamBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( Adam ) ) );
 			oroMemsetD32( (oroDeviceptr)m_dmatBuffer->data(), 0, m_dmatBuffer->bytes() / sizeof(float) );
@@ -448,6 +457,17 @@ namespace rpml
 		{
 			synchronizeLearning();
 
+#if ENABLE_FP16
+			{
+				int nElem = m_matBuffer->bytes() / sizeof( float );
+				ShaderArgument args;
+				args.add( m_matBufferFp16->data() );
+				args.add( m_matBuffer->data() );
+				args.add( nElem );
+				m_forwardShader->launch( "toFp16", args, div_round_up( nElem, 64 ), 1, 1, 64, 1, 1, stream );
+			}
+#endif
+
 			int outputDim = m_Ws[m_Ws.size() - 1].m_col;
 			int location = 0;
 			GPUMat inputGPU = allocateGPUMat( &location, input.row(), input.col() );
@@ -473,11 +493,21 @@ namespace rpml
 
 			ShaderArgument args;
 			args.add( m_intermediateBuffer->data() );
+#if ENABLE_FP16
+			args.add( m_matBufferFp16->data() );
+#else
 			args.add( m_matBuffer->data() );
+#endif
 			args.add( arg );
 
 			int gridDim = div_round_up( input.row(), SHARED_TENSOR_ROW );
-			m_forwardShader->launch( "forward", args, gridDim, 1, 1, 1, 64, 1, stream );
+			const char* forwardKernel =
+#if ENABLE_FP16
+				"forwardFp16";
+#else
+				"forward";
+#endif
+			m_forwardShader->launch( forwardKernel, args, gridDim, 1, 1, 1, 64, 1, stream );
 
 			output->setShape( outputGPU.m_row, outputGPU.m_col );
 
@@ -487,6 +517,7 @@ namespace rpml
 		}
 
 		std::unique_ptr<Buffer> m_matBuffer;
+		std::unique_ptr<Buffer> m_matBufferFp16;
 		std::vector<GPUMat> m_Ws;
 		std::vector<GPUMat> m_Bs;
 		int m_gridFeatureLocation = 0;
