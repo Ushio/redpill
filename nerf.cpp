@@ -15,7 +15,7 @@ using namespace rpml;
 #include <json.hpp>
 
 #define LINEAR_SPACE_LEARNING 0
-#define INSTANT_NGP_SCENE 1
+#define INSTANT_NGP_SCENE 0
 
 struct NerfCamera
 {
@@ -214,9 +214,9 @@ public:
 			// Photo 4
 			adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.467639, 0.248784, 0.570989 } );
 
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 0.0f ), { 0, 0, 1 } );// Z
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 0.0f ), { 0, 1, 0 } );// Y
-			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 137.306f ), { 1, 0, 0 } );// X
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 0.645361f ), { 0, 0, 1 } ); // Z
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 0.00378608f ), { 0, 1, 0 } ); // Y
+			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 137.978f ), { 1, 0, 0 } ); // X
 
 			adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.0338603, 0.0338603, 0.0338603 } );
 
@@ -359,14 +359,15 @@ int main()
 	float scale = 0.5f;
 	const int n_rays_per_batch = 4096;
 
-#if 0
+#if 1
 	{
 		static std::vector<NeRFInput> inputs;
 		static std::vector<NeRFOutput> refs;
 		static StandardRng rng;
 
 		// for( int k = 0; k < 2048; ++k )
-		for( int k = 0; executionSW.elapsed() < 60.0 * 7.0; ++k )
+		// 60.0 * 7.0
+		for( int k = 0; executionSW.elapsed() < 120; ++k )
 		{
 			if( ( k % 16 ) == 0 )
 			{
@@ -378,49 +379,66 @@ int main()
 
 			for( int i = 0; i < n_rays_per_batch; ++i )
 			{
-				int camIdx = rng.drawUInt() % cameras.size();
-				const NerfCamera& nc = cameras[camIdx];
+				//int camIdx = rng.drawUInt() % cameras.size();
+				//const NerfCamera& nc = cameras[camIdx];
 
-				glm::vec3 o = { 0, 0, 0 };
-				glm::vec3 up = { 0, 1, 0 };
-				glm::vec3 lookat = { 0, 0, -1 };
+				//glm::vec3 o = { 0, 0, 0 };
+				//glm::vec3 up = { 0, 1, 0 };
+				//glm::vec3 lookat = { 0, 0, -1 };
 
-				up = glm::mat3( glm::inverseTranspose( nc.transform ) ) * up;
-				o = nc.transform * glm::vec4( o, 1.0f );
-				lookat = nc.transform * glm::vec4( lookat, 1.0f );
+				//up = glm::mat3( glm::inverseTranspose( nc.transform ) ) * up;
+				//o = nc.transform * glm::vec4( o, 1.0f );
+				//lookat = nc.transform * glm::vec4( lookat, 1.0f );
 
-				Camera3D cam3d;
-				cam3d.origin = o;
-				cam3d.lookat = lookat;
-				cam3d.up = up;
-				cam3d.fovy = nc.fovy;
-				cam3d.zFar = 4.0f;
-				cam3d.zNear = 0.1f;
-				cam3d.zUp = false;
-				glm::mat4 view, proj;
-				GetCameraMatrix( cam3d, &proj, &view, 800, 800 );
-				CameraRayGenerator raygen( view, proj, 800, 800 );
+				//Camera3D cam3d;
+				//cam3d.origin = o;
+				//cam3d.lookat = lookat;
+				//cam3d.up = up;
+				//cam3d.fovy = nc.fovy;
+				//cam3d.zFar = 4.0f;
+				//cam3d.zNear = 0.1f;
+				//cam3d.zUp = false;
+				//glm::mat4 view, proj;
+				//GetCameraMatrix( cam3d, &proj, &view, 800, 800 );
+				//CameraRayGenerator raygen( view, proj, 800, 800 );
 
+				//glm::vec3 ro;
+				//glm::vec3 rd;
+				//int x = rng.drawUInt() % 800;
+				//int y = rng.drawUInt() % 800;
+				//raygen.shoot( &ro, &rd, x, y, rng.draw(), rng.draw() );
+				//rd = glm::normalize( rd );
+
+				//glm::vec3 one_over_rd = safe_inv_rd( rd );
+				//glm::vec3 input_ro = ro;
+
+				//NeRFInput input;
+				//input.ro[0] = input_ro.x;
+				//input.ro[1] = input_ro.y;
+				//input.ro[2] = input_ro.z;
+				//input.rd[0] = rd.x;
+				//input.rd[1] = rd.y;
+				//input.rd[2] = rd.z;
+				//inputs.push_back( input );
+				
+				// glm::uvec4 color = nc.image( x, y );
+
+				int camIdx = rng.drawUInt() % colmap.numberOfCamera();
+				glm::u8vec4 color;
 				glm::vec3 ro;
 				glm::vec3 rd;
-				int x = rng.drawUInt() % 800;
-				int y = rng.drawUInt() % 800;
-				raygen.shoot( &ro, &rd, x, y, rng.draw(), rng.draw() );
+				colmap.sample( &color, &ro, &rd, 0.0001f, 1.0f, camIdx, rng.draw(), rng.draw() );
 				rd = glm::normalize( rd );
 
-				glm::vec3 one_over_rd = safe_inv_rd( rd );
-				glm::vec3 input_ro = ro;
-
 				NeRFInput input;
-				input.ro[0] = input_ro.x;
-				input.ro[1] = input_ro.y;
-				input.ro[2] = input_ro.z;
+				input.ro[0] = ro.x;
+				input.ro[1] = ro.y;
+				input.ro[2] = ro.z;
 				input.rd[0] = rd.x;
 				input.rd[1] = rd.y;
 				input.rd[2] = rd.z;
 				inputs.push_back( input );
-
-				glm::uvec4 color = nc.image( x, y );
+				
 				NeRFOutput output = {};
 	#if LINEAR_SPACE_LEARNING
 				output.color[0] = std::pow( (float)color.x / 255.0f, 2.2f );
@@ -431,7 +449,7 @@ int main()
 				output.color[1] = (float)color.y / 255.0f;
 				output.color[2] = (float)color.z / 255.0f;
 	#endif
-				output.color[3] = (float)color.z / 255.0f;
+				output.color[3] = (float)color.w / 255.0f;
 				refs.push_back( output );
 			}
 			nerfg.train( inputs.data(), refs.data(), inputs.size(), stream );
@@ -446,6 +464,7 @@ int main()
 		printf( "Alembic Error: %s\n", errorMessage.c_str() );
 	}
 
+	// for( int i = 0; i < 1; ++i )
 	for( int i = 0; i < archive.frameCount() ; ++i )
 	{
 		printf( "render [%d] at %f\n", i, executionSW.elapsed() );
@@ -481,7 +500,8 @@ int main()
 				rayGenerator.shoot( &ro, &rd, x, y, 0.5f, 0.5f );
 				rd = glm::normalize( rd );
 
-				glm::vec3 input_ro = ro * scale + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+				// glm::vec3 input_ro = ro * scale + glm::vec3( 0.5f, 0.5f, 0.5f ); // -1 ~ +1 to 0 ~ 1
+				glm::vec3 input_ro = ro;
 
 				NeRFInput input;
 				input.ro[0] = input_ro.x;
