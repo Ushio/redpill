@@ -572,14 +572,12 @@ extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPF
 extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer, float* matBufferF, MLPForwardArg arg )
 {
 	__shared__ __half tensor[64 * SHARED_TENSOR_ROW];
-	// __shared__ __half tensorOut[64 * SHARED_TENSOR_ROW];
 
 	int yi_global_base = blockIdx.x * SHARED_TENSOR_ROW;
 	int xi = threadIdx.y;
 
-	float value[SHARED_TENSOR_ROW];
-
-	{
+    if( arg.encoder == EncoderType::None )
+    {
 		float vs[SHARED_TENSOR_ROW];
 		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 		{
@@ -597,29 +595,6 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 		{
 			setTensor( tensor, xi, yi_local, vs[yi_local] );
 		}
-	}
-	__syncthreads();
-
-	if( arg.encoder == EncoderType::Frequency )
-	{
-		Frequency frequency( arg.inputMat.m_col, xi, FREQ_N );
-
-		if( xi < frequency.outputDim() )
-		{
-			for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
-			{
-				float v = getTensor( tensor, frequency.dimIwant(), yi_local );
-				value[yi_local] = frequency.encode( v );
-			}
-		}
-		__syncthreads();
-		if( xi < frequency.outputDim() )
-		{
-			for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
-			{
-				setTensor( tensor, xi, yi_local, value[yi_local] );
-			}
-		}
 		__syncthreads();
 	}
 	else if( arg.encoder == EncoderType::MultiResolutionHash )
@@ -629,14 +604,20 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 		int baseLevel = GRID_T * GRID_F * level;
 		float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
 
+        for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			setTensor( tensor, xi, yi_local, (__half)0.0f );
+		}
+		__syncthreads();
+
 		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 		{
 			float input[GRID_INPUT_DIM];
 			for( int x = 0; x < GRID_INPUT_DIM; x++ )
 			{
-				input[x] = getTensor( tensor, x, yi_local );
+				int yi = yi_global_base + yi_local;
+				input[x] = yi < arg.inputMat.m_row ? intermediates[elem( x, yi, arg.inputMat )] : 0.0f;
 			}
-			__syncthreads();
 
 			if( level < GRID_L )
 			{
@@ -713,6 +694,7 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 
 	if( xi < arg.outputMat.m_col )
 	{
+		float value[SHARED_TENSOR_ROW];
 		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 		{
 			value[yi_local] = getTensor( tensor, xi, yi_local );
