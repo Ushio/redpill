@@ -252,7 +252,95 @@ int main()
 	printf( "GPU: %s\n", props.name );
 
 	MLPg mlpg( mlpConfig,
-			pr::GetDataPath( "kernels" ), strstr( props.name, "NVIDIA" ) != 0 );
+			   pr::GetDataPath( "kernels" ), oroGetCurAPI( 0 ) & ORO_API_CUDADRIVER );
+
+
+#if 0
+	{
+		// Batch
+		static StandardRng rng;
+		static int iterations = 0;
+
+		float loss = 0;
+		int NData = 256 * 8 + 1;
+		static Mat inputs( NData, 2 );
+		static Mat refs( NData, 3 );
+
+		Stopwatch sw_train;
+		for( int j = 0; j < 1000; ++j )
+		{
+			Stopwatch sw_prepare;
+			for( int i = 0; i < NData; ++i )
+			{
+				// if it's freq then need to be carefull range of x?
+				float u = rng.draw();
+				float v = rng.draw();
+				int ui = (int)glm::mix( 0.0f, (float)image.width(), u );
+				int vi = (int)glm::mix( 0.0f, (float)image.height(), v );
+				inputs( 0, i ) = u;
+				inputs( 1, i ) = v;
+
+				glm::uvec3 y = image( ui, vi );
+				refs( 0, i ) = y.x / 255.0f;
+				refs( 1, i ) = y.y / 255.0f;
+				refs( 2, i ) = y.z / 255.0f;
+			}
+			// printf( "sw_prepare %f\n", sw_prepare.elapsed() );
+			// loss = mlp.train( inputs, refs );
+			mlpg.train( stream, inputs, refs );
+
+			iterations++;
+		}
+		oroStreamSynchronize( stream );
+	}
+
+	{
+		static Image2DRGBA8 estimatedImage;
+
+		Stopwatch sw_estimate;
+		int estimatorWidth = image.width() * previewScale;
+		int estimatorHeight = image.height() * previewScale;
+		static Mat inUVs;
+		static Mat outColors;
+		estimatedImage.allocate( estimatorWidth, estimatorHeight );
+		inUVs.setShape( estimatorWidth * estimatorHeight, 2 );
+
+		for( int yi = 0; yi < estimatorHeight; yi++ )
+		{
+			for( int xi = 0; xi < estimatorWidth; xi++ )
+			{
+				int i = yi * estimatorWidth + xi;
+				inUVs( 0, i ) = ( xi + 0.5f ) / (float)estimatorWidth;
+				inUVs( 1, i ) = ( yi + 0.5f ) / (float)estimatorHeight;
+			}
+		}
+		mlpg.foward( stream, inUVs, &outColors );
+
+		for( int yi = 0; yi < estimatorHeight; yi++ )
+		{
+			for( int xi = 0; xi < estimatorWidth; xi++ )
+			{
+				int i = yi * estimatorWidth + xi;
+				estimatedImage( xi, yi ) = glm::uvec4(
+					glm::clamp<int>( outColors( 0, i ) * 255.0f, 0, 255 ),
+					glm::clamp<int>( outColors( 1, i ) * 255.0f, 0, 255 ),
+					glm::clamp<int>( outColors( 2, i ) * 255.0f, 0, 255 ),
+					255 );
+			}
+		}
+		for( int i = 0; i < 10; ++i )
+		{
+			float sEstimate = sw_estimate.elapsed();
+			printf( "sEstimate %f\n", sEstimate );
+		}
+
+		char name[256];
+		sprintf( name, "estimated_%03d.png", 1000 );
+		estimatedImage.saveAsPng( name );
+	}
+	return 0;
+#endif
+
 
 	Config config;
 	config.ScreenWidth = 1500;

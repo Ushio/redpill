@@ -312,8 +312,8 @@ int main()
 	// colmap.load( pr::GetDataPath( "nerf/photo3_ngp" ).c_str() );
 	colmap.load( pr::GetDataPath( "nerf/photo4" ).c_str() );
 #endif
-
-	NeRFg nerfg( pr::GetDataPath( "kernels" ), strstr( props.name, "NVIDIA" ) != 0 );
+	
+	NeRFg nerfg( pr::GetDataPath( "kernels" ), oroGetCurAPI( 0 ) & ORO_API_CUDADRIVER );
 	std::vector<NerfCamera> cameras;
 
 	// for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )
