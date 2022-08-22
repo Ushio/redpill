@@ -1152,28 +1152,13 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 
 	int yi_global_base = blockIdx.x * SHARED_TENSOR_ROW;
 	int xi = threadIdx.y;
-	float value[SHARED_TENSOR_ROW];
 
-	if( xi < arg.inputMat.m_col )
+
+    for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 	{
-		float vs[SHARED_TENSOR_ROW];
-		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
-		{
-			int yi = yi_global_base + yi_local;
-			if( yi < arg.inputMat.m_row )
-			{
-				vs[yi_local] = intermediates[elem( xi, yi, arg.inputMat )];
-			}
-			else
-			{
-				vs[yi_local] = 0.0f;
-			}
-		}
-		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
-		{
-			setTensor( tensor, xi, yi_local, vs[yi_local] );
-		}
+		setTensor( tensor, xi, yi_local, 0.0f );
 	}
+
 	__syncthreads();
 
 	{
@@ -1186,9 +1171,9 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 			float input[GRID_INPUT_DIM];
 			for( int x = 0; x < GRID_INPUT_DIM; x++ )
 			{
-				input[x] = getTensor( tensor, x, yi_local );
+				int yi = yi_global_base + yi_local;
+				input[x] = yi < arg.inputMat.m_row ? intermediates[elem( x, yi, arg.inputMat )] : 0.0f;
 			}
-			__syncthreads();
 
 			if( level < GRID_L )
 			{
@@ -1348,6 +1333,7 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 
 	if( xi < arg.outputMat.m_col - 1 /* !important! don't override density */ )
 	{
+		float value[SHARED_TENSOR_ROW];
 		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 		{
 			value[yi_local] = getTensor( tensor, xi, yi_local );
