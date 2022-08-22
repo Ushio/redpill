@@ -6,7 +6,9 @@
 #include <memory>
 #include <intrin.h>
 
-#define ENABLE_FP16 0
+#include <half.h>
+
+#define ENABLE_WMMA 1
 
 #define RPMLX_ASSERT( ExpectTrue ) \
 	if( ( ExpectTrue ) == 0 )     \
@@ -108,7 +110,7 @@ namespace rpml
 	class Shader
 	{
 	public:
-		Shader( const char* filename, const char* kernelLabel, const std::vector<std::string>& includeDirs, const std::vector<std::string>& extraArgs, CompileMode compileMode )
+		Shader( const char* filename, const char* kernelLabel, const std::vector<std::string>& includeDirs, const std::vector<std::string>& extraArgs, CompileMode compileMode, bool isNvidia )
 		{
 			std::vector<char> src;
 			loadAsVector( &src, filename );
@@ -120,7 +122,10 @@ namespace rpml
 			std::vector<std::string> options;
 			options.push_back( "-std=c++11");
 
-			// options.push_back( "--gpu-architecture=compute_70" );
+			if( isNvidia )
+			{
+				options.push_back( "--gpu-architecture=compute_70" );
+			}
 			for( int i = 0; i < includeDirs.size(); ++i )
 			{
 				options.push_back( "-I " + includeDirs[i] );
@@ -128,9 +133,14 @@ namespace rpml
 
 			if( compileMode == CompileMode::RelwithDebInfo )
 			{
-				//options.push_back( "-G" );
-				options.push_back( "--generate-line-info" );
-				
+				if( isNvidia )
+				{
+					options.push_back( "--generate-line-info" );
+				}
+				else
+				{
+					options.push_back( "-G" );
+				}
 			}
 
 			for( int i = 0; i < extraArgs.size(); ++i )
@@ -215,7 +225,7 @@ namespace rpml
 				}
 			}
 		};
-		MLPg( const MLPConfig& config, std::string kernels ) : m_config( config )
+		MLPg( const MLPConfig& config, std::string kernels, bool isNvidia ) : m_config( config )
 		{
 			std::vector<std::string> macros;
 
@@ -255,7 +265,7 @@ namespace rpml
 					}
 				}
 
-				GPUMat w = allocateGPUMat( &location, input, output );
+				GPUMat w = allocateGPUMat( &location, input, output, WMMA_ALIGNMENT );
 				GPUMat b = allocateGPUMat( &location, 1, output );
 
 				m_Ws.push_back( w );
@@ -263,7 +273,7 @@ namespace rpml
 			}
 
 			m_matBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
-#if ENABLE_FP16
+#if ENABLE_WMMA
 			m_matBufferFp16 = std::unique_ptr<Buffer>( new Buffer( location * sizeof( uint16_t ) ) );
 #endif
 			m_dmatBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
@@ -273,7 +283,7 @@ namespace rpml
 
 			// initialization
 			StandardRng rng;
-			std::vector<float> matBuffer( location );
+			std::vector<float> matBuffer( location ); // zero cleared including padding
 			for( int i = 0; i < m_Ws.size(); i++ )
 			{
 				int input = m_Ws[i].m_row;
@@ -310,7 +320,63 @@ namespace rpml
 
 			oroMemcpyHtoD( (oroDeviceptr)m_matBuffer->data(), matBuffer.data(), matBuffer.size() * sizeof( float ) );
 
-			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release ) );
+			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release, isNvidia ) );
+			
+			// 
+
+			// wmma 
+			//Buffer bufferA( 16 * 16 * sizeof( half ) );
+			//Buffer bufferB( 16 * 16 * sizeof( half ) );
+			//Buffer bufferOut( 16 * 16 * sizeof( half ) );
+			//
+			//Mat a( 16, 16 );
+			//Mat b( 16, 16 );
+			//int idx = 0;
+			//for( int y = 0; y < 16; y++ )
+			//{
+			//	for( int x = 0; x < 16; x++ )
+			//	{
+			//		a( x, y ) = (float)idx++ / 128.0f;
+			//		b( x, y ) = (float)idx++ / 128.0f;
+			//	}
+			//}
+
+			//std::vector<half> ha( a.bytes() / sizeof( float ) );
+			//std::vector<half> hb( b.bytes() / sizeof( float ) );
+			//for( int i = 0; i < 16 * 16; ++i )
+			//{
+			//	ha[i] = half( a.data()[i] );
+			//	hb[i] = half( b.data()[i] );
+			//}
+
+			//oroMemcpyHtoD( (oroDeviceptr)bufferA.data(), ha.data(), ha.size() * sizeof( half ) );
+			//oroMemcpyHtoD( (oroDeviceptr)bufferB.data(), hb.data(), hb.size() * sizeof( half ) );
+
+			//ShaderArgument args;
+			//args.add( bufferA.data() );
+			//args.add( bufferB.data() );
+			//args.add( bufferOut.data() );
+			//m_forwardShader->launch( "matmal_16x16", args, 1, 1, 1, 1, 32, 1, 0 );
+
+			//std::vector<half> hc( 16 * 16 );
+			//oroMemcpyDtoH( hc.data(), (oroDeviceptr)bufferOut.data(), hc.size() * sizeof( glm::u16 ) );
+
+			//for( int i = 0; i < 16 * 16; ++i )
+			//{
+			//	float f = hc[i];
+			//	printf( "%.2f, ", f );
+			//}
+			//printf( "\n" );
+
+			//Mat c( 16, 16 );
+			//mul( &c, a, b );
+
+			//for( int i = 0; i < 16 * 16; ++i )
+			//{
+			//	float f = c.data()[i];
+			//	printf( "%.2f, ", f );
+			//}
+			//printf( "\n" );
 		}
 		void train( oroStream stream, const Mat& input, const Mat& refs )
 		{
@@ -419,6 +485,7 @@ namespace rpml
 				task->wait();
 			}
 		}
+		/* this does not work now
 		void takeReference( const MLP& mlp )
 		{
 			bool hasEncoder = dynamic_cast<const AffineLayer*>( mlp.m_layers[0].get() ) == 0;
@@ -453,11 +520,12 @@ namespace rpml
 				oroMemcpyHtoD( ( oroDeviceptr )( m_matBuffer->data() + m_Bs[i].m_location * sizeof( float ) ), (void*)affineLayers[i]->m_b.data(), affineLayers[i]->m_b.bytes() );
 			}
 		}
+		*/
 		void foward( oroStream stream, const Mat& input, Mat* output )
 		{
 			synchronizeLearning();
 
-#if ENABLE_FP16
+#if ENABLE_WMMA
 			{
 				int nElem = m_matBuffer->bytes() / sizeof( float );
 				ShaderArgument args;
@@ -493,7 +561,7 @@ namespace rpml
 
 			ShaderArgument args;
 			args.add( m_intermediateBuffer->data() );
-#if ENABLE_FP16
+#if ENABLE_WMMA
 			args.add( m_matBufferFp16->data() );
 #else
 			args.add( m_matBuffer->data() );
@@ -502,8 +570,8 @@ namespace rpml
 
 			int gridDim = div_round_up( input.row(), SHARED_TENSOR_ROW );
 			const char* forwardKernel =
-#if ENABLE_FP16
-				"forwardFp16";
+#if ENABLE_WMMA
+				"forwardWMMA";
 #else
 				"forward";
 #endif
@@ -538,7 +606,7 @@ namespace rpml
 	class NeRFg
 	{
 	public:
-		NeRFg( std::string kernels )
+		NeRFg( std::string kernels, bool isNvidia )
 		{
 			std::vector<std::string> macros;
 
@@ -628,7 +696,7 @@ namespace rpml
 			oroMemsetD32( (oroDeviceptr)m_occupancyBuffer->data(), as_int32( 65536.0f ), m_occupancyBuffer->bytes() / sizeof( int ) );
 			m_occupancyAvgBuffer = std::unique_ptr<Buffer>( new Buffer( sizeof( float ) ) );
 			oroMemsetD32( (oroDeviceptr)m_occupancyAvgBuffer->data(), 0, 1 );
-			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release ) );
+			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release, isNvidia ) );
 		}
 		void takeReference( const NeRF& nerf )
 		{

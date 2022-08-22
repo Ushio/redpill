@@ -41,7 +41,8 @@ typedef unsigned int uint32_t;
 
 namespace rpml
 {
-	const int GPU_MAT_ALIGNMENT = 8;
+	const int GPU_MAT_ALIGNMENT = 16; // assume == Mat::ROW_MULTIPLE for convinience 
+	const int WMMA_ALIGNMENT = 16;
 	constexpr float pi = 3.14159265358979323846f;
 
 	enum class EncoderType
@@ -136,14 +137,17 @@ namespace rpml
 		return mat.m_location + mat.m_paddedRow * x + y;
 	}
 
-	DEVICE_INLINE GPUMat allocateGPUMat( int *location, int row, int col )
+	DEVICE_INLINE GPUMat allocateGPUMat( int *location, int row, int col, int colPadding = 1 )
 	{
 		GPUMat m;
 		m.m_row = row;
 		m.m_col = col;
 		m.m_paddedRow = next_multiple( row, GPU_MAT_ALIGNMENT );
 		m.m_location = *location;
-		*location += m.m_paddedRow * m.m_col;
+
+		int paddedCol = next_multiple( col, colPadding );
+
+		*location += m.m_paddedRow * paddedCol;
 		return m;
 	}
 

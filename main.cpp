@@ -239,7 +239,7 @@ int main()
 	oroError err;
 	err = oroInit( 0 );
 	oroDevice device;
-	err = oroDeviceGet( &device, 0 );
+	err = oroDeviceGet( &device, 1 );
 	oroCtx ctx;
 	err = oroCtxCreate( &ctx, 0, device );
 	oroCtxSetCurrent( ctx );
@@ -252,7 +252,7 @@ int main()
 	printf( "GPU: %s\n", props.name );
 
 	MLPg mlpg( mlpConfig,
-			pr::GetDataPath( "kernels" ) );
+			pr::GetDataPath( "kernels" ), strstr( props.name, "NVIDIA" ) != 0 );
 
 	Config config;
 	config.ScreenWidth = 1500;

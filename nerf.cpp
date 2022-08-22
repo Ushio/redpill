@@ -313,7 +313,7 @@ int main()
 	colmap.load( pr::GetDataPath( "nerf/photo4" ).c_str() );
 #endif
 
-	NeRFg nerfg( pr::GetDataPath( "kernels" ) );
+	NeRFg nerfg( pr::GetDataPath( "kernels" ), strstr( props.name, "NVIDIA" ) != 0 );
 	std::vector<NerfCamera> cameras;
 
 	// for( auto filePath : { "nerf/transforms_train.json", "nerf/transforms_test.json" ,"nerf/transforms_val.json"  } )

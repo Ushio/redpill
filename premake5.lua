@@ -44,18 +44,22 @@ project "demo"
     }
 
     -- Helper
-    files { "libs/d3dx12/*.h" }
-    includedirs { "libs/d3dx12/" }
+    -- files { "libs/d3dx12/*.h" }
+    -- includedirs { "libs/d3dx12/" }
 
-    links { "dxgi" }
-    links { "d3d12" }
+    -- links { "dxgi" }
+    -- links { "d3d12" }
 
-    -- HLSL compiler
-    includedirs { "libs/dxc_2021_12_08/inc" }
-    links { "libs/dxc_2021_12_08/lib/x64/dxcompiler" }
-    postbuildcommands { 
-        "{COPYFILE} ../libs/dxc_2021_12_08/bin/x64/*.dll ../bin"
-    }
+    -- -- HLSL compiler
+    -- includedirs { "libs/dxc_2021_12_08/inc" }
+    -- links { "libs/dxc_2021_12_08/lib/x64/dxcompiler" }
+    -- postbuildcommands { 
+    --     "{COPYFILE} ../libs/dxc_2021_12_08/bin/x64/*.dll ../bin"
+    -- }
+
+    -- half
+    includedirs { "libs/prlib/libs/src_ilmbase/" }
+    
 
     -- json
     includedirs { "libs/json" }
@@ -124,6 +128,9 @@ project "nerf"
     -- json
     includedirs { "libs/json" }
     files { "libs/json/json.hpp" }
+
+    -- half
+    includedirs { "libs/prlib/libs/src_ilmbase/" }
 
     -- prlib
     -- setup command

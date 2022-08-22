@@ -164,7 +164,7 @@ namespace rpml
 	{
 		enum
 		{
-			ROW_MULTIPLE = 8
+			ROW_MULTIPLE = 16
 		};
 		Mat() {}
 		Mat( int row, int col ) 
