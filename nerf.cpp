@@ -15,7 +15,7 @@ using namespace rpml;
 #include <json.hpp>
 
 #define LINEAR_SPACE_LEARNING 0
-#define INSTANT_NGP_SCENE 0
+#define INSTANT_NGP_SCENE 1
 
 struct NerfCamera
 {
@@ -359,7 +359,7 @@ int main()
 	float scale = 0.5f;
 	const int n_rays_per_batch = 4096;
 
-#if 1
+#if 0
 	{
 		static std::vector<NeRFInput> inputs;
 		static std::vector<NeRFOutput> refs;
@@ -367,7 +367,7 @@ int main()
 
 		// for( int k = 0; k < 2048; ++k )
 		// 60.0 * 7.0
-		for( int k = 0; executionSW.elapsed() < 120; ++k )
+		for( int k = 0; executionSW.elapsed() < 60.0 * 6.0; ++k )
 		{
 			if( ( k % 16 ) == 0 )
 			{
@@ -566,8 +566,13 @@ int main()
 	Initialize( config );
 
 	Camera3D camera;
+#if INSTANT_NGP_SCENE
 	camera.origin = { 3, 3, 3 };
 	camera.lookat = { 0, 0, 0 };
+#else
+	camera.lookat = { -0.099562, -0.646370, 0.053620 };
+	camera.origin = { -0.063579, -0.551639, 0.330146 };
+#endif
 	camera.zFar = 100;
 	camera.zNear = 0.01f;
 	camera.zUp = false;
@@ -627,7 +632,7 @@ int main()
 
 		static int iterations = 0; 
 
-		//if( iterations < 512 )
+		if( iterations < 128 )
 		if( isLearning )
 		for(int k = 0 ; k < 16 ; ++k)
 		{
@@ -955,6 +960,12 @@ int main()
 		ImGui::Text( "iterations %d", iterations );
 		ImGui::Checkbox( "isLearning", &isLearning );
 
+		if( ImGui::Button( "PrintCAM" ) )
+		{
+			printf( "look %f %f %f\n", camera.lookat.x, camera.lookat.y, camera.lookat.z );
+			printf( "origin %f %f %f\n", camera.origin.x, camera.origin.y, camera.origin.z );
+		}
+
 		static int index = 0;
 		if( ImGui::InputInt( "index", &index ) )
 		{
@@ -1036,7 +1047,12 @@ int main()
 			}
 
 			nerf_out.resize( nerf_in.size() );
+
+			Stopwatch fw;
+
 			nerfg.forward( nerf_in.data(), nerf_out.data(), nerf_in.size(), stream, INSTANT_NGP_SCENE == 0 );
+
+			printf( "forward %f s\n", fw.elapsed() );
 
 			int it = 0;
 			for( int y = 0; y < image.height(); ++y )

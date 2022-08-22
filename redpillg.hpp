@@ -8,7 +8,7 @@
 
 #include <half.h>
 
-#define ENABLE_WMMA 1
+#define ENABLE_WMMA 0
 
 #define RPMLX_ASSERT( ExpectTrue ) \
 	if( ( ExpectTrue ) == 0 )     \
@@ -125,6 +125,7 @@ namespace rpml
 			if( isNvidia )
 			{
 				options.push_back( "--gpu-architecture=compute_70" );
+				options.push_back( "-DPLATFORM_NVIDIA=1" );
 			}
 			for( int i = 0; i < includeDirs.size(); ++i )
 			{
@@ -136,10 +137,10 @@ namespace rpml
 				if( isNvidia )
 				{
 					options.push_back( "--generate-line-info" );
+					// options.push_back( "-G" );
 				}
 				else
 				{
-					options.push_back( "-G" );
 				}
 			}
 
@@ -700,7 +701,7 @@ namespace rpml
 			oroMemsetD32( (oroDeviceptr)m_occupancyBuffer->data(), as_int32( 65536.0f ), m_occupancyBuffer->bytes() / sizeof( int ) );
 			m_occupancyAvgBuffer = std::unique_ptr<Buffer>( new Buffer( sizeof( float ) ) );
 			oroMemsetD32( (oroDeviceptr)m_occupancyAvgBuffer->data(), 0, 1 );
-			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release, isNvidia ) );
+			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::RelwithDebInfo, isNvidia ) );
 		}
 		void takeReference( const NeRF& nerf )
 		{

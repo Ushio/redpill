@@ -1,7 +1,11 @@
-#include "cuda_fp16.h"
 #include "redpill_common.hpp"
 #include "helper_math.h"
+
+#if defined( PLATFORM_NVIDIA )
+#include "cuda_fp16.h"
 #include "mma.h"
+#endif
+
 
 #ifndef GRID_L
     #define GRID_INPUT_DIM 1
@@ -53,6 +57,8 @@ float getTensorBSL4( float* tensor, int x, int y, float vals[4] )
 
 using namespace rpml;
 
+#if defined( PLATFORM_NVIDIA )
+
 extern "C" __global__ void matmal_16x16( const half* const a_ptr, const half* const b_ptr, half* c_ptr )
 {
     nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::col_major> a_frag;
@@ -70,6 +76,7 @@ extern "C" __global__ void matmal_16x16( const half* const a_ptr, const half* co
     nvcuda::wmma::store_matrix_sync( c_ptr, c_frag, 16, nvcuda::wmma::mem_col_major );
 }
 
+#endif
 
 extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* intermediates, MLPTrainArg arg ) 
 {
@@ -569,6 +576,7 @@ extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPF
         }
     }
 }
+#if defined( PLATFORM_NVIDIA )
 extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer, float* matBufferF, MLPForwardArg arg )
 {
 	__shared__ __half tensor[64 * SHARED_TENSOR_ROW];
@@ -709,6 +717,7 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 		}
 	}
 }
+#endif
 
 extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* intermediates, GPUMat* nerfSamples, GPUMat dirMat, int nElement, uint32_t scrubmleIndex, float* occupancyGrid, float* occupancyAverage ) 
 {
@@ -1128,6 +1137,7 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
     }
 }
 
+#if defined( PLATFORM_NVIDIA )
 extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuffer, float* matBufferF, NeRFForwardArg arg )
 {
 	__shared__ __half tensor[64 * SHARED_TENSOR_ROW];
@@ -1330,6 +1340,7 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 		}
 	}
 }
+#endif
 
 extern "C" __global__ void nerfDecayOccupancy( float* occupancyGrid ) 
 {
@@ -1500,8 +1511,12 @@ extern "C" __global__ void avg( float* occupancyGrid, float* occupancyAverage )
 
     for( int i = 16; i >= 1; i /= 2 )
 	{
-		// density += __shfl_xor( density, i, 32 );
+#if defined( PLATFORM_NVIDIA )
+		
 		density += __shfl_xor_sync( 0xFFFFFFFF, density, i, 32 );
+#else
+		density += __shfl_xor( density, i, 32 );
+#endif
 	}
 
 	if( threadIdx.x == 0 )
