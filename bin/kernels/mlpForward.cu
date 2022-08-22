@@ -872,8 +872,9 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
     }
 }
 
-DEVICE_INLINE
-void sh_encode( float* tensor, int yi, float x, float y, float z )
+template <class T>
+DEVICE
+void sh_encode( T* tensor, int yi, float x, float y, float z )
 {
     constexpr float rpi = 1.7724538509055160273f; // newton_sqrt( pi );
     constexpr float r3 = 1.73205080756887729353f; // newton_sqrt( 3.0f );
@@ -945,13 +946,12 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
     int xi = threadIdx.y;
     float value[SHARED_TENSOR_ROW];
 
-    if( xi < arg.inputMat.m_col )
     {
         float vs[SHARED_TENSOR_ROW];
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
             int yi = yi_global_base + yi_local;
-            if( yi < arg.inputMat.m_row )
+			if( yi < arg.inputMat.m_row && xi < arg.inputMat.m_col )
             {
                 vs[yi_local] = intermediates[elem( xi, yi, arg.inputMat)];
             }
@@ -1145,6 +1145,224 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
         }
     }
 }
+
+extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuffer, float* matBufferF, NeRFForwardArg arg )
+{
+	__shared__ __half tensor[64 * SHARED_TENSOR_ROW];
+
+	int yi_global_base = blockIdx.x * SHARED_TENSOR_ROW;
+	int xi = threadIdx.y;
+	float value[SHARED_TENSOR_ROW];
+
+	if( xi < arg.inputMat.m_col )
+	{
+		float vs[SHARED_TENSOR_ROW];
+		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			int yi = yi_global_base + yi_local;
+			if( yi < arg.inputMat.m_row )
+			{
+				vs[yi_local] = intermediates[elem( xi, yi, arg.inputMat )];
+			}
+			else
+			{
+				vs[yi_local] = 0.0f;
+			}
+		}
+		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			setTensor( tensor, xi, yi_local, vs[yi_local] );
+		}
+	}
+	__syncthreads();
+
+	{
+		int level = xi / GRID_F;
+		int fdim = xi % GRID_F;
+		int baseLevel = GRID_T * GRID_F * level;
+		float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
+		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			float input[GRID_INPUT_DIM];
+			for( int x = 0; x < GRID_INPUT_DIM; x++ )
+			{
+				input[x] = getTensor( tensor, x, yi_local );
+			}
+			__syncthreads();
+
+			if( level < GRID_L )
+			{
+				HashGridEvaluator evaluator( GRID_INPUT_DIM );
+				float feature = 0.0f;
+				while( evaluator.moveNext() )
+				{
+					float w;
+					uint32_t h;
+					evaluator.evaluate( &w, &h, res, input );
+					uint32_t index = h % GRID_T;
+					int address = baseLevel + GRID_T * fdim + index;
+					float f = matBufferF[arg.gridFeatureLocation + address];
+					feature += w * f;
+				}
+				setTensor( tensor, xi, yi_local, feature );
+			}
+		}
+		__syncthreads();
+	}
+
+	for( int i = NERF_DENSITY_LAYER_BEG; i < NERF_DENSITY_LAYER_END; i++ )
+	{
+		int row = arg.m_Ws[i].m_row; // input
+		int col = arg.m_Ws[i].m_col; // output
+
+		nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> c_outTensor0;
+		nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> c_outTensor1;
+		nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::col_major> a_tensor;
+		nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::col_major> b_weight0;
+		nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::col_major> b_weight1;
+
+		nvcuda::wmma::fill_fragment( c_outTensor0, 0.0f );
+		nvcuda::wmma::fill_fragment( c_outTensor1, 0.0f );
+
+		int blockIdx = xi / 32; // 0 or 1
+		int x_location = blockIdx * 32;
+		for( int j = 0; j < row; j += 16 /* wmma step */ )
+		{
+			nvcuda::wmma::load_matrix_sync( a_tensor, tensor + j * SHARED_TENSOR_ROW, SHARED_TENSOR_ROW /* stride */ );
+			nvcuda::wmma::load_matrix_sync( b_weight0, &matBuffer[elem( x_location, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
+
+			if( x_location + 16 < col )
+				nvcuda::wmma::load_matrix_sync( b_weight1, &matBuffer[elem( x_location + 16, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
+
+			// C = A x B + C
+			nvcuda::wmma::mma_sync( c_outTensor0, a_tensor, b_weight0, c_outTensor0 );
+
+			if( x_location + 16 < col )
+				nvcuda::wmma::mma_sync( c_outTensor1, a_tensor, b_weight1, c_outTensor1 );
+		}
+
+		__syncthreads();
+
+		// Warning: assume no bias
+
+		float lowerbounds = i + 1 != NERF_DENSITY_LAYER_END ? 0.0f : -3.40282e+38f;
+		nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, half> c_outTensorH;
+		for( int t = 0; t < c_outTensorH.num_elements; t++ )
+		{
+			float v = fmaxf( c_outTensor0.x[t], lowerbounds );
+			c_outTensorH.x[t] = __float2half( v );
+		}
+		nvcuda::wmma::store_matrix_sync( tensor + x_location * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
+		for( int t = 0; t < c_outTensorH.num_elements; t++ )
+		{
+			float v = fmaxf( c_outTensor1.x[t], lowerbounds );
+			c_outTensorH.x[t] = __float2half( v );
+		}
+		nvcuda::wmma::store_matrix_sync( tensor + ( x_location + 16 ) * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
+
+		__syncthreads();
+	}
+
+	// density
+	if( xi == 0 )
+	{
+		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			float density = getTensor( tensor, 0, yi_local );
+			int yi = yi_global_base + yi_local;
+			if( yi < arg.outputMat.m_row )
+			{
+				intermediates[elem( 3, yi, arg.outputMat )] = density;
+			}
+		}
+	}
+
+	// directional
+	int nItrEncode = div_round_up( SHARED_TENSOR_ROW, 64 );
+	for( int i = 0; i < nItrEncode; i++ )
+	{
+		int yi_local = i * 64 + xi;
+		int yi = yi_global_base + yi_local;
+		if( yi_local < SHARED_TENSOR_ROW && yi < arg.outputMat.m_row )
+		{
+			float x = intermediates[elem( 0, yi, arg.dirMat )];
+			float y = intermediates[elem( 1, yi, arg.dirMat )];
+			float z = intermediates[elem( 2, yi, arg.dirMat )];
+			sh_encode( tensor, yi_local, x, y, z );
+		}
+	}
+	__syncthreads();
+
+	for( int i = NERF_COLOR_LAYER_BEG; i < NERF_COLOR_LAYER_END; i++ )
+	{
+		int row = arg.m_Ws[i].m_row; // input
+		int col = arg.m_Ws[i].m_col; // output
+
+        nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> c_outTensor0;
+		nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> c_outTensor1;
+		nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::col_major> a_tensor;
+		nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::col_major> b_weight0;
+		nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::col_major> b_weight1;
+
+		nvcuda::wmma::fill_fragment( c_outTensor0, 0.0f );
+		nvcuda::wmma::fill_fragment( c_outTensor1, 0.0f );
+
+		int blockIdx = xi / 32; // 0 or 1
+		int x_location = blockIdx * 32;
+		for( int j = 0; j < row; j += 16 /* wmma step */ )
+		{
+			nvcuda::wmma::load_matrix_sync( a_tensor, tensor + j * SHARED_TENSOR_ROW, SHARED_TENSOR_ROW /* stride */ );
+			nvcuda::wmma::load_matrix_sync( b_weight0, &matBuffer[elem( x_location, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
+
+			if( x_location + 16 < col )
+				nvcuda::wmma::load_matrix_sync( b_weight1, &matBuffer[elem( x_location + 16, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
+
+			// C = A x B + C
+			nvcuda::wmma::mma_sync( c_outTensor0, a_tensor, b_weight0, c_outTensor0 );
+
+			if( x_location + 16 < col )
+				nvcuda::wmma::mma_sync( c_outTensor1, a_tensor, b_weight1, c_outTensor1 );
+		}
+
+		__syncthreads();
+
+		// Warning: assume no bias
+
+		float lowerbounds = i + 1 != NERF_COLOR_LAYER_END ? 0.0f : -3.40282e+38f;
+		nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, half> c_outTensorH;
+		for( int t = 0; t < c_outTensorH.num_elements; t++ )
+		{
+			float v = fmaxf( c_outTensor0.x[t], lowerbounds );
+			c_outTensorH.x[t] = __float2half( v );
+		}
+		nvcuda::wmma::store_matrix_sync( tensor + x_location * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
+		for( int t = 0; t < c_outTensorH.num_elements; t++ )
+		{
+			float v = fmaxf( c_outTensor1.x[t], lowerbounds );
+			c_outTensorH.x[t] = __float2half( v );
+		}
+		nvcuda::wmma::store_matrix_sync( tensor + ( x_location + 16 ) * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
+
+		__syncthreads();
+	}
+
+	if( xi < arg.outputMat.m_col - 1 /* !important! don't override density */ )
+	{
+		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			value[yi_local] = getTensor( tensor, xi, yi_local );
+		}
+		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
+		{
+			int yi = yi_global_base + yi_local;
+			if( yi < arg.outputMat.m_row )
+			{
+				intermediates[elem( xi, yi, arg.outputMat )] = value[yi_local];
+			}
+		}
+	}
+}
+
 extern "C" __global__ void nerfDecayOccupancy( float* occupancyGrid ) 
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;

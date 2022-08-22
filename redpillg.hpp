@@ -320,7 +320,7 @@ namespace rpml
 
 			oroMemcpyHtoD( (oroDeviceptr)m_matBuffer->data(), matBuffer.data(), matBuffer.size() * sizeof( float ) );
 
-			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::Release, isNvidia ) );
+			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::RelwithDebInfo, isNvidia ) );
 			
 			// 
 
@@ -634,20 +634,23 @@ namespace rpml
 			location += elementsPerTable * m_hashConfig.L;
 
 			// Density Network ( 32 -> 64 -> 16 )
-			m_Ws.push_back( allocateGPUMat( &location, encodeOutputDim, 64 ) );
+			m_Ws.push_back( allocateGPUMat( &location, encodeOutputDim, 64, WMMA_ALIGNMENT ) );
 			m_Bs.push_back( allocateGPUMat( &location, 1, 64 ) );
-			m_Ws.push_back( allocateGPUMat( &location, 64, 16 ) );
+			m_Ws.push_back( allocateGPUMat( &location, 64, 16, WMMA_ALIGNMENT ) );
 			m_Bs.push_back( allocateGPUMat( &location, 1,  16 ) );
 
 			// Color Network ( 32 -> 64 -> 64 -> 3 )
-			m_Ws.push_back( allocateGPUMat( &location, 32, 64 ) );
+			m_Ws.push_back( allocateGPUMat( &location, 32, 64, WMMA_ALIGNMENT ) );
 			m_Bs.push_back( allocateGPUMat( &location, 1, 64 ) );
-			m_Ws.push_back( allocateGPUMat( &location, 64, 64 ) );
+			m_Ws.push_back( allocateGPUMat( &location, 64, 64, WMMA_ALIGNMENT ) );
 			m_Bs.push_back( allocateGPUMat( &location, 1, 64 ) );
-			m_Ws.push_back( allocateGPUMat( &location, 64, 3 ) );
+			m_Ws.push_back( allocateGPUMat( &location, 64, 3, WMMA_ALIGNMENT ) );
 			m_Bs.push_back( allocateGPUMat( &location, 1, 3 ) );
 
 			m_matBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
+#if ENABLE_WMMA
+			m_matBufferFp16 = std::unique_ptr<Buffer>( new Buffer( location * sizeof( uint16_t ) ) );
+#endif
 			m_dmatBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( float ) ) );
 			m_adamBuffer = std::unique_ptr<Buffer>( new Buffer( location * sizeof( Adam ) ) );
 			oroMemsetD32( (oroDeviceptr)m_dmatBuffer->data(), 0, m_dmatBuffer->bytes() / sizeof( float ) );
@@ -991,6 +994,17 @@ namespace rpml
 		}
 		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement, oroStream stream, int colorspaceCvt_adobeRGB2sRGB )
 		{
+#if ENABLE_WMMA
+			{
+				int nElem = m_matBuffer->bytes() / sizeof( float );
+				ShaderArgument args;
+				args.add( m_matBufferFp16->data() );
+				args.add( m_matBuffer->data() );
+				args.add( nElem );
+				m_forwardShader->launch( "toFp16", args, div_round_up( nElem, 64 ), 1, 1, 64, 1, 1, stream );
+			}
+#endif
+
 			int blockSize = 16384;
 			int nIter = div_round_up( nElement, blockSize );
 			for( int iBlock = 0; iBlock < nIter; iBlock++ )
@@ -1068,11 +1082,22 @@ namespace rpml
 
 					ShaderArgument args;
 					args.add( m_intermediateBuffer->data() );
+#if ENABLE_WMMA
+					args.add( m_matBufferFp16->data() );
 					args.add( m_matBuffer->data() );
+#else
+					args.add( m_matBuffer->data() );
+#endif
 					args.add( arg );
 
 					int gridDim = div_round_up( inputGPU.m_row, SHARED_TENSOR_ROW );
-					m_forwardShader->launch( "nerfForward", args, gridDim, 1, 1, 1, 64, 1, stream );
+					const char *nerfForward = 
+#if ENABLE_WMMA
+						"nerfForwardWMMA";
+#else
+						"nerfForward";
+#endif
+					m_forwardShader->launch( nerfForward, args, gridDim, 1, 1, 1, 64, 1, stream );
 				}
 
 				{
@@ -1102,6 +1127,7 @@ namespace rpml
 		//std::unique_ptr<Buffer> m_inputBuffer;
 		//std::unique_ptr<Buffer> m_outputBuffer;
 		std::unique_ptr<Buffer> m_matBuffer;
+		std::unique_ptr<Buffer> m_matBufferFp16;
 		std::vector<GPUMat> m_Ws;
 		std::vector<GPUMat> m_Bs;
 		int m_gridFeatureLocation = 0;
