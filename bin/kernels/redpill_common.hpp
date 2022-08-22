@@ -33,6 +33,7 @@ typedef unsigned int uint32_t;
 
 #define SHARED_TENSOR_ROW 16
 
+#define ENABLE_DEMO_BIAS 0
 #define ENABLE_NERF_BIAS 0
 
 #define NERF_AVG_BATCH 128
