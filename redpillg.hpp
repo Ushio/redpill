@@ -563,6 +563,7 @@ namespace rpml
 			args.add( m_intermediateBuffer->data() );
 #if ENABLE_WMMA
 			args.add( m_matBufferFp16->data() );
+			args.add( m_matBuffer->data() );
 #else
 			args.add( m_matBuffer->data() );
 #endif

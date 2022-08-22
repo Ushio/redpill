@@ -569,7 +569,7 @@ extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPF
         }
     }
 }
-extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer, MLPForwardArg arg )
+extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer, float* matBufferF, MLPForwardArg arg )
 {
 	__shared__ __half tensor[64 * SHARED_TENSOR_ROW];
 	// __shared__ __half tensorOut[64 * SHARED_TENSOR_ROW];
@@ -628,6 +628,7 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 		int fdim = xi % GRID_F;
 		int baseLevel = GRID_T * GRID_F * level;
 		float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
+
 		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 		{
 			float input[GRID_INPUT_DIM];
@@ -648,7 +649,7 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 					evaluator.evaluate( &w, &h, res, input );
 					uint32_t index = h % GRID_T;
 					int address = baseLevel + GRID_T * fdim + index;
-					float f = matBuffer[arg.gridFeatureLocation + address];
+					float f = matBufferF[arg.gridFeatureLocation + address];
 					feature += w * f;
 				}
 				setTensor( tensor, xi, yi_local, feature );
