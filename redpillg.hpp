@@ -613,7 +613,9 @@ namespace rpml
 			std::vector<std::string> macros;
 
 			{
-				m_hashConfig.L = 16;
+				m_learningRate = 2.0f;
+
+				m_hashConfig.L = 17;
 				m_hashConfig.T = std::pow( 2, 19 );
 				m_hashConfig.F = 2;
 				m_hashConfig.Nmin = 16;
@@ -935,7 +937,7 @@ namespace rpml
 				adamArgs.add( m_matBuffer->data() );
 				adamArgs.add( m_dmatBuffer->data() );
 				adamArgs.add( m_adamBuffer->data() );
-				adamArgs.add( 16.0f / nElement );
+				adamArgs.add( m_learningRate / nElement );
 				adamArgs.add( beta1t );
 				adamArgs.add( beta2t );
 				adamArgs.add( nAdam );
@@ -1149,5 +1151,6 @@ namespace rpml
 		int m_iteration = 0;
 		int m_nerfRaysIteration = 0;
 		int m_nerfDerivativeIteration = 0;
+		float m_learningRate = 0.0f;
 	};
 }

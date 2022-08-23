@@ -719,6 +719,54 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 }
 #endif
 
+DEVICE_INLINE
+float2 sphere_segment( float3 ro, float3 rd, float3 o, float r, float maxT )
+{
+	float A = dot( rd, rd );
+	float3 S = ro - o;
+	float3 SxRD = cross( S, rd );
+	float D = A * r * r - dot( SxRD, SxRD );
+
+	if( D < 0.0f )
+	{
+		return make_float2( 0.0f, 0.0f );
+	}
+
+	float B = dot( S, rd );
+	float sqrt_d = sqrt( D );
+	float t0 = ( -B - sqrt_d ) / A;
+	float t1 = ( -B + sqrt_d ) / A;
+	t0 = fmaxf( t0, 0.0f );
+	t1 = fminf( t1, maxT );
+	if( t1 < t0 )
+	{
+		return make_float2( 0.0f, 0.0f );
+	}
+	return make_float2( t0, t1 );
+}
+
+DEVICE_INLINE
+float interestedSegmentSample( float2 segment, float L, float densityScale, float x /* 0 to 1 */ )
+{
+	//  L0   L1     L2
+	//-----+======+-----
+	float L0 = segment.x;
+	float L1 = ( segment.y - segment.x ) * densityScale;
+	float L2 = L - segment.y;
+	float Lsum = L0 + L1 + L2;
+	float location = x * Lsum;
+	if( L0 <= location && location < L0 + L1 )
+	{
+		location = L0 + ( location - L0 ) / densityScale;
+	}
+	else if( L0 + L1 <= location )
+	{
+		location = location - ( L1 - ( segment.y - segment.x ) );
+	}
+	return location;
+}
+
+
 extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* intermediates, GPUMat* nerfSamples, GPUMat dirMat, int nElement, uint32_t scrubmleIndex, float* occupancyGrid, float* occupancyAverage ) 
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -752,6 +800,38 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			float x1 = (float)( i + bias + 1 ) / ( MLP_STEP - 1 );
 			float d0 = a * x0 * x0;
 			float d1 = a * x1 * x1;
+			float dt = d1 - d0;
+			float3 p = ro + rd * ( h.x + d0 );
+
+			if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
+			{
+				break;
+			}
+			p.x = fclamp( p.x, 0.0f, 1.0f );
+			p.y = fclamp( p.y, 0.0f, 1.0f );
+			p.z = fclamp( p.z, 0.0f, 1.0f );
+
+			if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
+			{
+				nEvals++;
+			}
+			nSteps++;
+		}
+#elif SAMPLING_INTERRESTED_SEGMENT
+		float densityScale = 3.0f;
+		float3 interest = make_float3( 0.455336f, 0.122419f, 0.545162f );
+		float radius = 0.141107f;
+		float L = sqrt( 3.0f );
+		float2 segment = sphere_segment( ro, rd, interest, radius, L );
+
+
+		float bias = pcg3df( make_uint3( x, scrubmleIndex, 12832 ) ).x;
+		for( int i = 0; i < MLP_STEP; ++i )
+		{
+			float x0 = (float)( i + bias ) / ( MLP_STEP - 1 );
+			float x1 = (float)( i + bias + 1 ) / ( MLP_STEP - 1 );
+			float d0 = interestedSegmentSample( segment, L, densityScale, x0 );
+			float d1 = interestedSegmentSample( segment, L, densityScale, x1 );
 			float dt = d1 - d0;
 			float3 p = ro + rd * ( h.x + d0 );
 
@@ -805,6 +885,37 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			float x1 = (float)( i + bias + 1 ) / ( MLP_STEP - 1 );
 			float d0 = a * x0 * x0;
 			float d1 = a * x1 * x1;
+			float dt = d1 - d0;
+			float3 p = ro + rd * ( h.x + d0 );
+
+			if( p.x < -eps || 1.0f + eps < p.x || p.y < -eps || 1.0f + eps < p.y || p.z < -eps || 1.0f + eps < p.z )
+			{
+				break;
+			}
+			p.x = fclamp( p.x, 0.0f, 1.0f );
+			p.y = fclamp( p.y, 0.0f, 1.0f );
+			p.z = fclamp( p.z, 0.0f, 1.0f );
+
+			if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
+			{
+				intermediates[elem( 0, eval_beg + i_sample, outputMat )] = p.x;
+				intermediates[elem( 1, eval_beg + i_sample, outputMat )] = p.y;
+				intermediates[elem( 2, eval_beg + i_sample, outputMat )] = p.z;
+				intermediates[elem( 3, eval_beg + i_sample, outputMat )] = dt;
+				intermediates[elem( 0, eval_beg + i_sample, dirMat )] = rd.x;
+				intermediates[elem( 1, eval_beg + i_sample, dirMat )] = rd.y;
+				intermediates[elem( 2, eval_beg + i_sample, dirMat )] = rd.z;
+				i_sample++;
+			}
+		}
+#elif SAMPLING_INTERRESTED_SEGMENT
+		int i_sample = 0;
+		for( int i = 0; i < MLP_STEP; ++i )
+		{
+			float x0 = (float)( i + bias ) / ( MLP_STEP - 1 );
+			float x1 = (float)( i + bias + 1 ) / ( MLP_STEP - 1 );
+			float d0 = interestedSegmentSample( segment, L, densityScale, x0 );
+			float d1 = interestedSegmentSample( segment, L, densityScale, x1 );
 			float dt = d1 - d0;
 			float3 p = ro + rd * ( h.x + d0 );
 

@@ -15,7 +15,7 @@ using namespace rpml;
 #include <json.hpp>
 
 #define LINEAR_SPACE_LEARNING 0
-#define INSTANT_NGP_SCENE 1
+#define INSTANT_NGP_SCENE 0
 
 struct NerfCamera
 {
@@ -212,7 +212,7 @@ public:
 			//adjustmentMatrix = glm::scale( adjustmentMatrix, { 0.108665, 0.108665, 0.108665 } );
 
 			// Photo 4
-			adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.467639, 0.248784, 0.570989 } );
+			adjustmentMatrix = glm::translate( adjustmentMatrix, { 0.467639, 0.211784f, 0.570989 } );
 
 			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 0.645361f ), { 0, 0, 1 } ); // Z
 			adjustmentMatrix = glm::rotate( adjustmentMatrix, glm::radians( 0.00378608f ), { 0, 1, 0 } ); // Y
@@ -357,7 +357,8 @@ int main()
 #endif
 
 	float scale = 0.5f;
-	const int n_rays_per_batch = 4096;
+	// const int n_rays_per_batch = 4096;
+	const int n_rays_per_batch = 1024;
 
 #if 0
 	{

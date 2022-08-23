@@ -38,7 +38,8 @@ typedef unsigned int uint32_t;
 
 #define NERF_AVG_BATCH 128
 
-#define SAMPLING_DISTANCE_PROPORTIONAL 1
+#define SAMPLING_DISTANCE_PROPORTIONAL 0
+#define SAMPLING_INTERRESTED_SEGMENT 1
 
 namespace rpml
 {
