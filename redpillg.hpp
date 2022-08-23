@@ -615,7 +615,7 @@ namespace rpml
 			{
 				m_learningRate = 2.0f;
 
-				m_hashConfig.L = 17;
+				m_hashConfig.L = 18;
 				m_hashConfig.T = std::pow( 2, 19 );
 				m_hashConfig.F = 2;
 				m_hashConfig.Nmin = 16;
