@@ -663,40 +663,50 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 
         int blockIdx = xi / 32; // 0 or 1
 		int x_location = blockIdx * 32;
-        for( int j = 0; j < row; j += 16 /* wmma step */ )
+
+        if( x_location < col ) // check if this wave has work
 		{
-			nvcuda::wmma::load_matrix_sync( a_tensor, tensor + j * SHARED_TENSOR_ROW, SHARED_TENSOR_ROW /* stride */ );
-			nvcuda::wmma::load_matrix_sync( b_weight0, &matBuffer[elem( x_location     , j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
+            for( int j = 0; j < row; j += 16 /* wmma step */ )
+		    {
+			    nvcuda::wmma::load_matrix_sync( a_tensor, tensor + j * SHARED_TENSOR_ROW, SHARED_TENSOR_ROW /* stride */ );
+			    nvcuda::wmma::load_matrix_sync( b_weight0, &matBuffer[elem( x_location     , j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
 
-            if( x_location + 16 < col )
-			    nvcuda::wmma::load_matrix_sync( b_weight1, &matBuffer[elem( x_location + 16, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
+                if( x_location + 16 < col )
+			        nvcuda::wmma::load_matrix_sync( b_weight1, &matBuffer[elem( x_location + 16, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
 
-			// C = A x B + C
-			nvcuda::wmma::mma_sync( c_outTensor0, a_tensor, b_weight0, c_outTensor0 );
+			    // C = A x B + C
+			    nvcuda::wmma::mma_sync( c_outTensor0, a_tensor, b_weight0, c_outTensor0 );
 
-            if( x_location + 16 < col )
-			    nvcuda::wmma::mma_sync( c_outTensor1, a_tensor, b_weight1, c_outTensor1 );
+                if( x_location + 16 < col )
+			        nvcuda::wmma::mma_sync( c_outTensor1, a_tensor, b_weight1, c_outTensor1 );
+		    }
 		}
 
 		__syncthreads();
 
         // Warning: assume no bias
-
         float lowerbounds = i + 1 != arg.nLayer ? 0.0f : -3.40282e+38f;
         nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, half> c_outTensorH;
-		for( int t = 0; t < c_outTensorH.num_elements; t++ )
+
+		if( x_location < col )
 		{
-			float v = fmaxf( c_outTensor0.x[t], lowerbounds );
-			c_outTensorH.x[t] = __float2half( v );
+		    for( int t = 0; t < c_outTensorH.num_elements; t++ )
+		    {
+			    float v = fmaxf( c_outTensor0.x[t], lowerbounds );
+			    c_outTensorH.x[t] = __float2half( v );
+		    }
+		    nvcuda::wmma::store_matrix_sync( tensor + x_location * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
 		}
-		nvcuda::wmma::store_matrix_sync( tensor + x_location * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
-		for( int t = 0; t < c_outTensorH.num_elements; t++ )
+
+        if( x_location + 16 < col )
 		{
-			float v = fmaxf( c_outTensor1.x[t], lowerbounds );
-			c_outTensorH.x[t] = __float2half( v );
+		    for( int t = 0; t < c_outTensorH.num_elements; t++ )
+		    {
+			    float v = fmaxf( c_outTensor1.x[t], lowerbounds );
+			    c_outTensorH.x[t] = __float2half( v );
+		    }
+		    nvcuda::wmma::store_matrix_sync( tensor + ( x_location + 16 ) * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
 		}
-		nvcuda::wmma::store_matrix_sync( tensor + ( x_location + 16 ) * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
-        
         __syncthreads();
 	}
 
@@ -1314,19 +1324,22 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 
 		int blockIdx = xi / 32; // 0 or 1
 		int x_location = blockIdx * 32;
-		for( int j = 0; j < row; j += 16 /* wmma step */ )
+		if( x_location < col ) // check if this wave has work
 		{
-			nvcuda::wmma::load_matrix_sync( a_tensor, tensor + j * SHARED_TENSOR_ROW, SHARED_TENSOR_ROW /* stride */ );
-			nvcuda::wmma::load_matrix_sync( b_weight0, &matBuffer[elem( x_location, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
+		    for( int j = 0; j < row; j += 16 /* wmma step */ )
+		    {
+			    nvcuda::wmma::load_matrix_sync( a_tensor, tensor + j * SHARED_TENSOR_ROW, SHARED_TENSOR_ROW /* stride */ );
+                nvcuda::wmma::load_matrix_sync( b_weight0, &matBuffer[elem( x_location, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
 
-			if( x_location + 16 < col )
-				nvcuda::wmma::load_matrix_sync( b_weight1, &matBuffer[elem( x_location + 16, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
+			    if( x_location + 16 < col )
+				    nvcuda::wmma::load_matrix_sync( b_weight1, &matBuffer[elem( x_location + 16, j, arg.m_Ws[i] )], arg.m_Ws[i].m_paddedRow );
 
-			// C = A x B + C
-			nvcuda::wmma::mma_sync( c_outTensor0, a_tensor, b_weight0, c_outTensor0 );
+			    // C = A x B + C
+			    nvcuda::wmma::mma_sync( c_outTensor0, a_tensor, b_weight0, c_outTensor0 );
 
-			if( x_location + 16 < col )
-				nvcuda::wmma::mma_sync( c_outTensor1, a_tensor, b_weight1, c_outTensor1 );
+			    if( x_location + 16 < col )
+				    nvcuda::wmma::mma_sync( c_outTensor1, a_tensor, b_weight1, c_outTensor1 );
+		    }
 		}
 
 		__syncthreads();
@@ -1335,18 +1348,26 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 
 		float lowerbounds = i + 1 != NERF_DENSITY_LAYER_END ? 0.0f : -3.40282e+38f;
 		nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, half> c_outTensorH;
-		for( int t = 0; t < c_outTensorH.num_elements; t++ )
+
+        if( x_location < col )
 		{
-			float v = fmaxf( c_outTensor0.x[t], lowerbounds );
-			c_outTensorH.x[t] = __float2half( v );
+		    for( int t = 0; t < c_outTensorH.num_elements; t++ )
+		    {
+			    float v = fmaxf( c_outTensor0.x[t], lowerbounds );
+			    c_outTensorH.x[t] = __float2half( v );
+		    }
+		    nvcuda::wmma::store_matrix_sync( tensor + x_location * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
 		}
-		nvcuda::wmma::store_matrix_sync( tensor + x_location * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
-		for( int t = 0; t < c_outTensorH.num_elements; t++ )
+
+        if( x_location + 16 < col )
 		{
-			float v = fmaxf( c_outTensor1.x[t], lowerbounds );
-			c_outTensorH.x[t] = __float2half( v );
+		    for( int t = 0; t < c_outTensorH.num_elements; t++ )
+		    {
+			    float v = fmaxf( c_outTensor1.x[t], lowerbounds );
+			    c_outTensorH.x[t] = __float2half( v );
+		    }
+		    nvcuda::wmma::store_matrix_sync( tensor + ( x_location + 16 ) * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
 		}
-		nvcuda::wmma::store_matrix_sync( tensor + ( x_location + 16 ) * SHARED_TENSOR_ROW, c_outTensorH, SHARED_TENSOR_ROW, nvcuda::wmma::mem_col_major );
 
 		__syncthreads();
 	}
