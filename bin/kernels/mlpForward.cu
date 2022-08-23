@@ -756,6 +756,31 @@ float2 sphere_segment( float3 ro, float3 rd, float3 o, float r, float maxT )
 }
 
 DEVICE_INLINE
+float2 box_segment( float3 ro, float3 rd, float3 p0, float3 p1, float maxT )
+{
+	float3 one_over_rd =
+		clamp(
+			make_float3( 1.0f / rd.x, 1.0f / rd.y, 1.0f / rd.z ),
+			-3.40282e+38f,
+			+3.40282e+38f );
+	float3 t0 = ( p0 - ro ) * one_over_rd;
+	float3 t1 = ( p1 - ro ) * one_over_rd;
+	float3 tmin = fminf( t0, t1 );
+	float3 tmax = fmaxf( t0, t1 );
+	float region_min = compMax( tmin );
+	float region_max = compMin( tmax );
+
+	region_max = fminf( region_max, maxT );
+	region_min = fmaxf( region_min, 0.0f );
+
+	if( region_max < region_min )
+	{
+		return make_float2( 0.0f, 0.0f );
+	}
+	return make_float2( region_min, region_max );
+}
+
+DEVICE_INLINE
 float interestedSegmentSample( float2 segment, float L, float densityScale, float x /* 0 to 1 */ )
 {
 	//  L0   L1     L2
@@ -829,11 +854,19 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 		}
 #elif SAMPLING_INTERRESTED_SEGMENT
 		float densityScale = 3.0f;
-		float3 interest = make_float3( 0.463351f, 0.122419f, 0.543271f );
-		float radius = 0.116899f;
 		float L = sqrt( 3.0f );
-		float2 segment = sphere_segment( ro, rd, interest, radius, L );
 
+        // sphere 
+		//float3 interest = make_float3( 0.463351f, 0.122419f, 0.543271f );
+		//float radius = 0.116899f;
+		//float2 segment = sphere_segment( ro, rd, interest, radius, L );
+
+        // box 
+		float3 box_size = make_float3( 0.115335f, 0.0313458f, 0.0799485f );
+		float3 box_center = make_float3( 0.463006f, 0.130146f, 0.544956f );
+		float3 pa = box_center - box_size * 0.5f;
+		float3 pb = box_center + box_size * 0.5f;
+		float2 segment = box_segment( ro, rd, pa, pb, L );
 
 		float bias = pcg3df( make_uint3( x, scrubmleIndex, 12832 ) ).x;
 		for( int i = 0; i < MLP_STEP; ++i )
