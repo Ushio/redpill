@@ -368,7 +368,7 @@ int main()
 
 		// for( int k = 0; k < 2048; ++k )
 		// 60.0 * 7.0
-		for( int k = 0; executionSW.elapsed() < 60.0 * 6.0; ++k )
+		for( int k = 0; executionSW.elapsed() < 60.0 * 5.0; ++k )
 		{
 			if( ( k % 16 ) == 0 )
 			{

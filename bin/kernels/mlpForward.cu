@@ -818,7 +818,7 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			nSteps++;
 		}
 #elif SAMPLING_INTERRESTED_SEGMENT
-		float densityScale = 5.0f;
+		float densityScale = 3.0f;
 		float3 interest = make_float3( 0.455336f, 0.122419f, 0.545162f );
 		float radius = 0.141107f;
 		float L = sqrt( 3.0f );
@@ -1456,7 +1456,7 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 extern "C" __global__ void nerfDecayOccupancy( float* occupancyGrid ) 
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
-    occupancyGrid[x] *= 0.97f;
+    occupancyGrid[x] *= 0.98f;
 }
 extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg arg, float* occupancyGrid, int iteration ) 
 {
