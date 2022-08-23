@@ -758,6 +758,8 @@ namespace rpml
 		}
 		float train( const NeRFInput* inputs, const NeRFOutput* outputs, int nElement, oroStream stream )
 		{
+			m_matBufferFp16NeedsUpdate = true;
+
 			int blockSize = 1024;
 			int nIter = div_round_up( nElement, blockSize );
 			for( int iBlock = 0; iBlock < nIter; iBlock++ )
@@ -998,6 +1000,7 @@ namespace rpml
 		void forward( const NeRFInput* inputs, NeRFOutput* outputs, int nElement, oroStream stream, int colorspaceCvt_adobeRGB2sRGB )
 		{
 #if ENABLE_WMMA
+			if( m_matBufferFp16NeedsUpdate )
 			{
 				int nElem = m_matBuffer->bytes() / sizeof( float );
 				ShaderArgument args;
@@ -1005,6 +1008,8 @@ namespace rpml
 				args.add( m_matBuffer->data() );
 				args.add( nElem );
 				m_forwardShader->launch( "toFp16", args, div_round_up( nElem, 64 ), 1, 1, 64, 1, 1, stream );
+			
+				m_matBufferFp16NeedsUpdate = false;
 			}
 #endif
 
@@ -1131,6 +1136,8 @@ namespace rpml
 		//std::unique_ptr<Buffer> m_outputBuffer;
 		std::unique_ptr<Buffer> m_matBuffer;
 		std::unique_ptr<Buffer> m_matBufferFp16;
+		bool m_matBufferFp16NeedsUpdate = true;
+
 		std::vector<GPUMat> m_Ws;
 		std::vector<GPUMat> m_Bs;
 		int m_gridFeatureLocation = 0;
