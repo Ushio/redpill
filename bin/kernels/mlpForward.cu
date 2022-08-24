@@ -16,6 +16,16 @@
     #define GRID_B 2.0f
 #endif
 
+DEVICE_INLINE
+int elemGrid( int level, int hashIndex, int fdim )
+{
+    // index sequencial ( slower )
+	// return GRID_T * GRID_F * level + GRID_T * fdim + hashIndex;
+
+    // f sequencial ( faster )
+	return GRID_T * GRID_F * level + GRID_F * hashIndex + fdim;
+}
+
 #ifndef FREQ_N 
 #define FREQ_N 2
 #endif
@@ -146,7 +156,6 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
-        int baseLevel = GRID_T * GRID_F * level;
         float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
@@ -167,7 +176,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                     uint32_t h;
                     evaluator.evaluate( &w, &h, res, input );
                     uint32_t index = h % GRID_T;
-                    int address = baseLevel + GRID_T * fdim + index;
+					int address = elemGrid( level, index, fdim );
                     float f = matBuffer[arg.gridFeatureLocation + address];
                     feature += w * f;
                 }
@@ -365,7 +374,6 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
-        int baseLevel = GRID_T * GRID_F * level;
         float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
@@ -392,7 +400,7 @@ extern "C" __global__ void train( float* matBuffer, float* dMatBuffer, float* in
                     uint32_t h;
                     evaluator.evaluate( &w, &h, res, input );
                     uint32_t index = h % GRID_T;
-                    int address = baseLevel + GRID_T * fdim + index;
+					int address = elemGrid( level, index, fdim );
                     float wd =  w * derivative;
                     if ( wd != 0.0f )
                     {
@@ -483,7 +491,6 @@ extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPF
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
-        int baseLevel = GRID_T * GRID_F * level;
         float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
@@ -504,7 +511,7 @@ extern "C" __global__ void forward( float* intermediates, float* matBuffer, MLPF
                     uint32_t h;
                     evaluator.evaluate( &w, &h, res, input );
                     uint32_t index = h % GRID_T;
-                    int address = baseLevel + GRID_T * fdim + index;
+					int address = elemGrid( level, index, fdim );
                     float f = matBuffer[arg.gridFeatureLocation + address];
                     feature += w * f;
                 }
@@ -609,7 +616,6 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 	{
 		int level = xi / GRID_F;
 		int fdim = xi % GRID_F;
-		int baseLevel = GRID_T * GRID_F * level;
 		float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
 
         for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
@@ -637,7 +643,7 @@ extern "C" __global__ void forwardWMMA( float* intermediates, __half* matBuffer,
 					uint32_t h;
 					evaluator.evaluate( &w, &h, res, input );
 					uint32_t index = h % GRID_T;
-					int address = baseLevel + GRID_T * fdim + index;
+					int address = elemGrid( level, index, fdim );
 					float f = matBufferF[arg.gridFeatureLocation + address];
 					feature += w * f;
 				}
@@ -853,7 +859,7 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			nSteps++;
 		}
 #elif SAMPLING_INTERRESTED_SEGMENT
-		float densityScale = 3.0f;
+		float densityScale = 5.0f;
 		float L = sqrt( 3.0f );
 
         // sphere 
@@ -862,8 +868,8 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 		//float2 segment = sphere_segment( ro, rd, interest, radius, L );
 
         // box 
-		float3 box_size = make_float3( 0.115335f, 0.0313458f, 0.0799485f );
-		float3 box_center = make_float3( 0.463006f, 0.130146f, 0.544956f );
+		float3 box_size = make_float3( 0.115335f, 0.0290954f, 0.0623049f );
+		float3 box_center = make_float3( 0.463006f, 0.129021f, 0.543686f );
 		float3 pa = box_center - box_size * 0.5f;
 		float3 pb = box_center + box_size * 0.5f;
 		float2 segment = box_segment( ro, rd, pa, pb, L );
@@ -1115,7 +1121,6 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
-        int baseLevel = GRID_T * GRID_F * level;
         float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
@@ -1136,7 +1141,7 @@ extern "C" __global__ void nerfForward( float* intermediates, float* matBuffer, 
                     uint32_t h;
                     evaluator.evaluate( &w, &h, res, input );
                     uint32_t index = h % GRID_T;
-                    int address = baseLevel + GRID_T * fdim + index;
+					int address = elemGrid( level, index, fdim );
                     float f = matBuffer[arg.gridFeatureLocation + address];
                     feature += w * f;
                 }
@@ -1310,7 +1315,6 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 	{
 		int level = xi / GRID_F;
 		int fdim = xi % GRID_F;
-		int baseLevel = GRID_T * GRID_F * level;
 		float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
 		for( int yi_local = 0; yi_local < SHARED_TENSOR_ROW; yi_local++ )
 		{
@@ -1331,7 +1335,7 @@ extern "C" __global__ void nerfForwardWMMA( float* intermediates, __half* matBuf
 					uint32_t h;
 					evaluator.evaluate( &w, &h, res, input );
 					uint32_t index = h % GRID_T;
-					int address = baseLevel + GRID_T * fdim + index;
+					int address = elemGrid( level, index, fdim );
 					float f = matBufferF[arg.gridFeatureLocation + address];
 					feature += w * f;
 				}
@@ -1560,7 +1564,6 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
-        int baseLevel = GRID_T * GRID_F * level;
         float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
@@ -1581,7 +1584,7 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
                     uint32_t h;
                     evaluator.evaluate( &w, &h, res, input );
                     uint32_t index = h % GRID_T;
-                    int address = baseLevel + GRID_T * fdim + index;
+					int address = elemGrid( level, index, fdim );
                     float f = matBuffer[arg.gridFeatureLocation + address];
                     feature += w * f;
                 }
@@ -1768,7 +1771,6 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
     {
         int level = xi / GRID_F;
         int fdim  = xi % GRID_F;
-        int baseLevel = GRID_T * GRID_F * level;
         float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
         for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
         {
@@ -1789,7 +1791,7 @@ extern "C" __global__ void trainNerfForward( float* intermediates, float* matBuf
                     uint32_t h;
                     evaluator.evaluate( &w, &h, res, input );
                     uint32_t index = h % GRID_T;
-                    int address = baseLevel + GRID_T * fdim + index;
+					int address = elemGrid( level, index, fdim );
                     float f = matBuffer[arg.gridFeatureLocation + address];
                     feature += w * f;
                 }
@@ -2276,7 +2278,6 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
     // encode backward
     int level = xi / GRID_F;
     int fdim  = xi % GRID_F;
-    int baseLevel = GRID_T * GRID_F * level;
     float res = floor( GRID_NMIN * INTRIN_POWF( GRID_B, level ) );
     for( int yi_local = 0 ; yi_local < SHARED_TENSOR_ROW ; yi_local++ )
     {
@@ -2303,7 +2304,7 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
                 uint32_t h;
                 evaluator.evaluate( &w, &h, res, input );
                 uint32_t index = h % GRID_T;
-                int address = baseLevel + GRID_T * fdim + index;
+				int address = elemGrid( level, index, fdim );
                 float wd =  w * derivative;
                 if ( wd != 0.0f )
                 {
