@@ -633,7 +633,7 @@ int main()
 
 		static int iterations = 0; 
 
-		if( iterations < 128 )
+		// if( iterations < 1024 )
 		if( isLearning )
 		for(int k = 0 ; k < 16 ; ++k)
 		{
