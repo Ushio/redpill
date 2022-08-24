@@ -52,19 +52,6 @@ void setTensor( __half* tensor, int xi, int yi, __half value )
 	tensor[xi * SHARED_TENSOR_ROW + yi] = value;
 }
 
-DEVICE
-float getTensorBSL4( float* tensor, int x, int y, float vals[4] )
-{
-	if( ( y % 4 ) == 0 )
-	{
-		for( int i = 0; i < 4; i++ )
-		{
-			vals[i] = tensor[x * SHARED_TENSOR_ROW + y + i];
-		}
-	}
-	return vals[y % 4];
-}
-
 using namespace rpml;
 
 #if defined( PLATFORM_NVIDIA )
@@ -764,11 +751,7 @@ float2 sphere_segment( float3 ro, float3 rd, float3 o, float r, float maxT )
 DEVICE_INLINE
 float2 box_segment( float3 ro, float3 rd, float3 p0, float3 p1, float maxT )
 {
-	float3 one_over_rd =
-		clamp(
-			make_float3( 1.0f / rd.x, 1.0f / rd.y, 1.0f / rd.z ),
-			-3.40282e+38f,
-			+3.40282e+38f );
+	float3 one_over_rd = safe_inv_rd( rd );
 	float3 t0 = ( p0 - ro ) * one_over_rd;
 	float3 t1 = ( p1 - ro ) * one_over_rd;
 	float3 tmin = fminf( t0, t1 );
@@ -848,9 +831,9 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			{
 				break;
 			}
-			p.x = fclamp( p.x, 0.0f, 1.0f );
-			p.y = fclamp( p.y, 0.0f, 1.0f );
-			p.z = fclamp( p.z, 0.0f, 1.0f );
+			p.x = clamp( p.x, 0.0f, 1.0f );
+			p.y = clamp( p.y, 0.0f, 1.0f );
+			p.z = clamp( p.z, 0.0f, 1.0f );
 
 			if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
 			{
@@ -888,9 +871,9 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			{
 				break;
 			}
-			p.x = fclamp( p.x, 0.0f, 1.0f );
-			p.y = fclamp( p.y, 0.0f, 1.0f );
-			p.z = fclamp( p.z, 0.0f, 1.0f );
+			p.x = clamp( p.x, 0.0f, 1.0f );
+			p.y = clamp( p.y, 0.0f, 1.0f );
+			p.z = clamp( p.z, 0.0f, 1.0f );
 
 			if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
 			{
@@ -909,9 +892,9 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
             {
                 break;
             }
-            p.x = fclamp( p.x, 0.0f, 1.0f );
-            p.y = fclamp( p.y, 0.0f, 1.0f );
-            p.z = fclamp( p.z, 0.0f, 1.0f );
+            p.x = clamp( p.x, 0.0f, 1.0f );
+            p.y = clamp( p.y, 0.0f, 1.0f );
+            p.z = clamp( p.z, 0.0f, 1.0f );
 
             if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
             {
@@ -941,9 +924,9 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			{
 				break;
 			}
-			p.x = fclamp( p.x, 0.0f, 1.0f );
-			p.y = fclamp( p.y, 0.0f, 1.0f );
-			p.z = fclamp( p.z, 0.0f, 1.0f );
+			p.x = clamp( p.x, 0.0f, 1.0f );
+			p.y = clamp( p.y, 0.0f, 1.0f );
+			p.z = clamp( p.z, 0.0f, 1.0f );
 
 			if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
 			{
@@ -972,9 +955,9 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			{
 				break;
 			}
-			p.x = fclamp( p.x, 0.0f, 1.0f );
-			p.y = fclamp( p.y, 0.0f, 1.0f );
-			p.z = fclamp( p.z, 0.0f, 1.0f );
+			p.x = clamp( p.x, 0.0f, 1.0f );
+			p.y = clamp( p.y, 0.0f, 1.0f );
+			p.z = clamp( p.z, 0.0f, 1.0f );
 
 			if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
 			{
@@ -998,9 +981,9 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
             {
                 break;
             }
-            p.x = fclamp( p.x, 0.0f, 1.0f );
-            p.y = fclamp( p.y, 0.0f, 1.0f );
-            p.z = fclamp( p.z, 0.0f, 1.0f );
+            p.x = clamp( p.x, 0.0f, 1.0f );
+            p.y = clamp( p.y, 0.0f, 1.0f );
+            p.z = clamp( p.z, 0.0f, 1.0f );
             
             if( isOccupied( p.x, p.y, p.z, dt, occupancyGrid, avg ) )
             {
@@ -2189,7 +2172,6 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
         {    
             // Weight derivative
             float x4[4];
-            float y4[4];
             for( int yi_W = 0 ; yi_W < row ; yi_W++ )
             {
                 float dW = 0.0f;
@@ -2201,7 +2183,7 @@ extern "C" __global__ void trainNerfBackward( float* intermediates, float* matBu
 
                     int yi = yi_global_base + yi_local;
 					float X = BSL4( intermediates, yi_W, yi, arg.m_Is[i] /* input Xs */, x4 );
-					float Y = getTensorBSL4( tensor, xi, yi_local, y4 );
+					float Y = getTensor( tensor, xi, yi_local );
                     dW = fma( X, Y, dW );
                 }
                 if( dW != 0.0f )

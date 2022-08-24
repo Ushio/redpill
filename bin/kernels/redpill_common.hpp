@@ -394,88 +394,6 @@ namespace rpml
 		int padd2;
 	};
 #if IS_HOST == 0
-	// DEVICE_INLINE
-	// float3 operator*( float3 a, float3 b )
-	// {
-	// 	float3 r;
-	// 	r.x = a.x * b.x;
-	// 	r.y = a.y * b.y;
-	// 	r.z = a.z * b.z;
-	// 	return r;
-	// }
-	// DEVICE_INLINE
-	// float3 operator*( float3 a, float b )
-	// {
-	// 	float3 r;
-	// 	r.x = a.x * b;
-	// 	r.y = a.y * b;
-	// 	r.z = a.z * b;
-	// 	return r;
-	// }
-	// 	DEVICE_INLINE
-	// float3 operator*( float a, float3 b )
-	// {
-	// 	float3 r;
-	// 	r.x = b.x * a;
-	// 	r.y = b.y * a;
-	// 	r.z = b.z * a;
-	// 	return r;
-	// }
-	// DEVICE_INLINE
-	// float3 operator-( float3 a, float3 b )
-	// {
-	// 	float3 r;
-	// 	r.x = a.x - b.x;
-	// 	r.y = a.y - b.y;
-	// 	r.z = a.z - b.z;
-	// 	return r;
-	// }
-	// DEVICE_INLINE
-	// float3 operator+( float3 a, float3 b )
-	// {
-	// 	float3 r;
-	// 	r.x = a.x + b.x;
-	// 	r.y = a.y + b.y;
-	// 	r.z = a.z + b.z;
-	// 	return r;
-	// }
-	// DEVICE_INLINE
-	// float3 operator/( float3 a, float3 b )
-	// {
-	// 	float3 r;
-	// 	r.x = a.x / b.x;
-	// 	r.y = a.y / b.y;
-	// 	r.z = a.z / b.z;
-	// 	return r;
-	// }
-	DEVICE_INLINE
-	float3 fmaxf3( float3 a, float3 b )
-	{
-		float3 r;
-		r.x = fmax( a.x, b.x );
-		r.y = fmax( a.y, b.y );
-		r.z = fmax( a.z, b.z );
-		return r;
-	}
-	DEVICE_INLINE
-	float3 fminf3( float3 a, float3 b )
-	{
-		float3 r;
-		r.x = fmin( a.x, b.x );
-		r.y = fmin( a.y, b.y );
-		r.z = fmin( a.z, b.z );
-		return r;
-	}
-	DEVICE_INLINE
-	float3 clampf3( float3 x, float3 a, float3 b )
-	{
-		return fmaxf3(a, fminf3(b, x));
-	}
-	DEVICE_INLINE
-	float fclamp( float x, float a, float b )
-	{
-		return fmin( fmax( x, a ), b );
-	}
 	DEVICE_INLINE
 	float compMin( float3 v )
 	{
@@ -491,20 +409,23 @@ namespace rpml
 	{
 		float3 t0 = ( p0 - ro ) * one_over_rd;
 		float3 t1 = ( p1 - ro ) * one_over_rd;
-
-		float3 tmin = fminf3( t0, t1 );
-		float3 tmax = fmaxf3( t0, t1 );
+		
+		float3 tmin = fminf( t0, t1 );
+		float3 tmax = fmaxf( t0, t1 );
 		float region_min = compMax( tmin );
 		float region_max = compMin( tmax );
 
-		region_min = fmax( region_min, 0.0f );
+		region_min = fmaxf( region_min, 0.0f );
 
 		return make_float2( region_min, region_max );
 	}
 	DEVICE_INLINE
 	float3 safe_inv_rd( float3 rd )
 	{
-		return clampf3( make_float3( 1.0f, 1.0f, 1.0f ) / rd, make_float3( -FLT_MAX, -FLT_MAX, -FLT_MAX ), make_float3( FLT_MAX, FLT_MAX, FLT_MAX ) );
+		return clamp(
+				make_float3( 1.0f / rd.x, 1.0f / rd.y, 1.0f / rd.z ),
+				-FLT_MAX,
+				+FLT_MAX );
 	}
 	DEVICE_INLINE
 	float nerfDensityActivation(float x)
@@ -514,7 +435,7 @@ namespace rpml
 	DEVICE_INLINE
 	float nerfDensityActivationDerivative( float x )
 	{
-		return INTRIN_EXPF( fclamp( x, -15.0f, 15.0f ) );
+		return INTRIN_EXPF( clamp( x, -15.0f, 15.0f ) );
 	}
 	DEVICE_INLINE
 	float nerfRgbActivation( float x )
