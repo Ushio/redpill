@@ -361,6 +361,7 @@ int main()
 	const int n_rays_per_batch = 1024;
 
 #if 0
+	printf( "initialize done at %f\n", executionSW.elapsed() );
 	{
 		static std::vector<NeRFInput> inputs;
 		static std::vector<NeRFOutput> refs;
