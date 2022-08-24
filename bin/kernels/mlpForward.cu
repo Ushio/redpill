@@ -842,7 +842,7 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 			nSteps++;
 		}
 #elif SAMPLING_INTERRESTED_SEGMENT
-		float densityScale = 5.0f;
+		float densityScale = 6.0f;
 		float L = sqrt( 3.0f );
 
         // sphere 
@@ -851,8 +851,8 @@ extern "C" __global__ void nerfRays( NeRFInput* inputs, NeRFRay *rays, float* in
 		//float2 segment = sphere_segment( ro, rd, interest, radius, L );
 
         // box 
-		float3 box_size = make_float3( 0.115335f, 0.0290954f, 0.0623049f );
-		float3 box_center = make_float3( 0.463006f, 0.129021f, 0.543686f );
+		float3 box_size = make_float3( 0.114899f, 0.0290954f, 0.0607268f );
+		float3 box_center = make_float3( 0.458769f, 0.129021f, 0.543683f );
 		float3 pa = box_center - box_size * 0.5f;
 		float3 pb = box_center + box_size * 0.5f;
 		float2 segment = box_segment( ro, rd, pa, pb, L );
