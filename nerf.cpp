@@ -460,7 +460,7 @@ int main()
 
 	pr::AbcArchive archive;
 	std::string errorMessage;
-	if( archive.open( GetDataPath( "camera.abc" ), errorMessage ) == AbcArchive::Result::Failure )
+	if( archive.open( GetDataPath( "camera2.abc" ), errorMessage ) == AbcArchive::Result::Failure )
 	{
 		printf( "Alembic Error: %s\n", errorMessage.c_str() );
 	}
