@@ -432,14 +432,18 @@ namespace rpml
 				+FLT_MAX );
 	}
 	DEVICE_INLINE
-	float nerfDensityActivation(float x)
+	float nerfDensityActivation( float x )
 	{
-		return INTRIN_EXPF( x );
+		return INTRIN_EXPF( clamp( x, -15.0f, 15.0f ) );
 	}
 	DEVICE_INLINE
 	float nerfDensityActivationDerivative( float x )
 	{
-		return INTRIN_EXPF( clamp( x, -15.0f, 15.0f ) );
+		if( x < -15.0f || 15.0f < x )
+		{
+			return 0.0f;
+		}
+		return INTRIN_EXPF( x );
 	}
 	DEVICE_INLINE
 	float nerfRgbActivation( float x )
