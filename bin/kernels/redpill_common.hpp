@@ -452,7 +452,7 @@ namespace rpml
 		return Y * ( 1.0f - Y );
 	}
 	DEVICE_INLINE
-	float3 occupancyDecodeLocation( uint32_t x )
+	float3 occupancyDecodeLocation( uint32_t x, float3 jitter )
 	{
 		x = x & 0x3FFFFFFF;
 		const int SUB_RES = 1024;
@@ -463,9 +463,9 @@ namespace rpml
 		int index_x = x;
 		float step = 1.0f / (float)SUB_RES;
 		return make_float3(
-			step * (float)index_x,
-			step * (float)index_y,
-			step * (float)index_z
+			step * ( (float)index_x + jitter.x ),
+			step * ( (float)index_y + jitter.y ),
+			step * ( (float)index_z + jitter.z )
 		);
 	}
 #endif

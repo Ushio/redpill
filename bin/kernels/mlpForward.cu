@@ -1529,16 +1529,17 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
 			hasher.add( index_z, NERF_OCCUPANCY_GRID_MIN_RES );
 			uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
 
+            float3 jitter = pcg3df( make_uint3( yi, iteration, 5972723 ) );
             float3 randomNumber;
             if( isMoving )
 			{
 				uint32_t location = pcg3d( make_uint3( yi, iteration, OCC_SEED ) ).x;
-				randomNumber = occupancyDecodeLocation( location );
+				randomNumber = occupancyDecodeLocation( location, jitter );
             }
 			else
 			{
 				uint32_t location = occupancyLocation[index];
-				randomNumber = occupancyDecodeLocation( location );
+				randomNumber = occupancyDecodeLocation( location, jitter );
             }
 			
 			float pz = ( index_z + randomNumber.x ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
