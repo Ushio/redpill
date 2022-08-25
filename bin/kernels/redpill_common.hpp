@@ -72,13 +72,13 @@ namespace rpml
 	}
 
 #if IS_HOST == 0
-	DEVICE_INLINE float3 pcg3df( uint3 v )
+	DEVICE_INLINE uint3 pcg3d( uint3 v )
 	{
 		v = v * 1664525u + 1013904223u;
 		v.x += v.y * v.z;
 		v.y += v.z * v.x;
 		v.z += v.x * v.y;
-		
+
 		v.x = v.x ^ ( v.x >> 16u );
 		v.y = v.y ^ ( v.y >> 16u );
 		v.z = v.z ^ ( v.z >> 16u );
@@ -86,7 +86,11 @@ namespace rpml
 		v.x += v.y * v.z;
 		v.y += v.z * v.x;
 		v.z += v.x * v.y;
-		
+		return v;
+	}
+	DEVICE_INLINE float3 pcg3df( uint3 v )
+	{
+		v = pcg3d( v );
 		return make_float3( 
 			v.x & uint32_t( 0x7fffffffU ),
 			v.y & uint32_t( 0x7fffffffU ),
@@ -446,6 +450,23 @@ namespace rpml
 	float nerfRgbActivationDrivativeY( float Y )
 	{
 		return Y * ( 1.0f - Y );
+	}
+	DEVICE_INLINE
+	float3 occupancyDecodeLocation( uint32_t x )
+	{
+		x = x & 0x3FFFFFFF;
+		const int SUB_RES = 1024;
+		int index_z = x / ( SUB_RES * SUB_RES );
+		x = x % ( SUB_RES * SUB_RES );
+		int index_y = x / SUB_RES;
+		x = x % SUB_RES;
+		int index_x = x;
+		float step = 1.0f / (float)SUB_RES;
+		return make_float3(
+			step * (float)index_x,
+			step * (float)index_y,
+			step * (float)index_z
+		);
 	}
 #endif
 

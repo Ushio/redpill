@@ -703,6 +703,9 @@ namespace rpml
 			oroMemsetD32( (oroDeviceptr)m_occupancyBuffer->data(), as_int32( 65536.0f ), m_occupancyBuffer->bytes() / sizeof( int ) );
 			m_occupancyAvgBuffer = std::unique_ptr<Buffer>( new Buffer( sizeof( float ) ) );
 			oroMemsetD32( (oroDeviceptr)m_occupancyAvgBuffer->data(), 0, 1 );
+			m_occupancyLocationBuffer = std::unique_ptr<Buffer>( new Buffer( NERF_OCCUPANCY_GRID_T * sizeof( uint32_t ) ) );
+			oroMemsetD32( (oroDeviceptr)m_occupancyLocationBuffer->data(), 0, m_occupancyLocationBuffer->bytes() / sizeof( uint32_t ) );
+
 			m_forwardShader = std::unique_ptr<Shader>( new Shader( ( kernels + "\\mlpForward.cu" ).c_str(), "mlpForward.cu", { kernels }, macros, CompileMode::RelwithDebInfo, isNvidia ) );
 		}
 		void takeReference( const NeRF& nerf )
@@ -974,6 +977,7 @@ namespace rpml
 					args.add( m_matBuffer->data() );
 					args.add( arg );
 					args.add( m_occupancyBuffer->data() );
+					args.add( m_occupancyLocationBuffer->data() );
 					args.add( m_iteration / 16 );
 					int gridDim = div_round_up( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES, SHARED_TENSOR_ROW );
 					m_forwardShader->launch( "nerfUpdateOccupancy", args, gridDim, 1, 1, 1, 64, 1, stream );
@@ -1149,6 +1153,7 @@ namespace rpml
 
 		std::unique_ptr<Buffer> m_occupancyBuffer;
 		std::unique_ptr<Buffer> m_occupancyAvgBuffer;
+		std::unique_ptr<Buffer> m_occupancyLocationBuffer;
 
 		// learning
 		std::unique_ptr<Buffer> m_intermediateBuffer;

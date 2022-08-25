@@ -1499,13 +1499,18 @@ extern "C" __global__ void nerfDecayOccupancy( float* occupancyGrid )
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     occupancyGrid[x] *= 0.98f;
 }
-extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg arg, float* occupancyGrid, int iteration ) 
+extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg arg, float* occupancyGrid, uint32_t* occupancyLocation, int iteration ) 
 {
     __shared__ float tensor[64 * SHARED_TENSOR_ROW];
 
     int yi_global_base = blockIdx.x * SHARED_TENSOR_ROW;
     int xi = threadIdx.y;
     float value[SHARED_TENSOR_ROW];
+
+    bool isMoving = ( iteration % 2 ) == 1;
+	iteration /= 2;
+
+    int OCC_SEED = 4893738;
 
     if( xi < 3 )
     {
@@ -1514,11 +1519,28 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
         {
             int yi = yi_global_base + yi_local;
 
-            // int hashbase = NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES * 3 * iteration;
             int index_z = yi / ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES ); yi = yi % ( NERF_OCCUPANCY_GRID_MIN_RES * NERF_OCCUPANCY_GRID_MIN_RES );
             int index_y = yi / NERF_OCCUPANCY_GRID_MIN_RES; yi = yi % NERF_OCCUPANCY_GRID_MIN_RES;
             int index_x = yi;
-            float3 randomNumber = pcg3df( make_uint3( yi, iteration, 4893738 ) );
+
+            SequencialHasher hasher;
+			hasher.add( index_x, NERF_OCCUPANCY_GRID_MIN_RES );
+			hasher.add( index_y, NERF_OCCUPANCY_GRID_MIN_RES );
+			hasher.add( index_z, NERF_OCCUPANCY_GRID_MIN_RES );
+			uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
+
+            float3 randomNumber;
+            if( isMoving )
+			{
+				uint32_t location = pcg3d( make_uint3( yi, iteration, OCC_SEED ) ).x;
+				randomNumber = occupancyDecodeLocation( location );
+            }
+			else
+			{
+				uint32_t location = occupancyLocation[index];
+				randomNumber = occupancyDecodeLocation( location );
+            }
+			
 			float pz = ( index_z + randomNumber.x ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
 			float py = ( index_y + randomNumber.y ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
 			float px = ( index_x + randomNumber.z ) * ( 1.0f / (float)NERF_OCCUPANCY_GRID_MIN_RES );
@@ -1635,18 +1657,22 @@ extern "C" __global__ void nerfUpdateOccupancy( float* matBuffer, NeRFForwardArg
             int index_y = yi / NERF_OCCUPANCY_GRID_MIN_RES; yi = yi % NERF_OCCUPANCY_GRID_MIN_RES;
             int index_x = yi;
 
-            int res = NERF_OCCUPANCY_GRID_MIN_RES;
-            for( int lv = 0 ; lv < NERF_OCCUPANCY_GRID_L ; lv++ )
-            {
-                SequencialHasher hasher;
-                hasher.add( index_x, NERF_OCCUPANCY_GRID_MIN_RES );
-                hasher.add( index_y, NERF_OCCUPANCY_GRID_MIN_RES );
-                hasher.add( index_z, NERF_OCCUPANCY_GRID_MIN_RES );
-                res *= 2;
+            SequencialHasher hasher;
+            hasher.add( index_x, NERF_OCCUPANCY_GRID_MIN_RES );
+            hasher.add( index_y, NERF_OCCUPANCY_GRID_MIN_RES );
+            hasher.add( index_z, NERF_OCCUPANCY_GRID_MIN_RES );
+            uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
 
-                uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
-				atomicMax( (uint32_t*)&occupancyGrid[NERF_OCCUPANCY_GRID_T * lv + index], __float_as_uint( density ) );
-            }
+            if( isMoving )
+			{
+				if( occupancyGrid[index] < density )
+				{
+					occupancyLocation[index] = pcg3d( make_uint3( yi, iteration, OCC_SEED ) ).x;
+				}
+			}
+			occupancyGrid[index] = fmaxf( occupancyGrid[index], density );
+            // it never conflicts
+			// atomicMax( (uint32_t*)&occupancyGrid[index], __float_as_uint( density ) );
         }
     }
 }
