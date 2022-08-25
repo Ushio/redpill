@@ -615,11 +615,11 @@ namespace rpml
 			{
 				m_learningRate = 2.0f;
 
-				m_hashConfig.L = 17;
+				m_hashConfig.L = 12;
 				m_hashConfig.T = std::pow( 2, 19 );
 				m_hashConfig.F = 2;
 				m_hashConfig.Nmin = 16;
-				m_hashConfig.b = 1.36f;
+				m_hashConfig.b = 2.0f;
 				macros.push_back( "-DGRID_INPUT_DIM=" + std::to_string( 3 ) );
 				macros.push_back( "-DGRID_L=" + std::to_string( m_hashConfig.L ) );
 				macros.push_back( "-DGRID_T=" + std::to_string( m_hashConfig.T ) );
