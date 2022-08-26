@@ -153,8 +153,8 @@ namespace rpml
 		return m;
 	}
 
-	// 438976903 PRIMES[0] = 1 is very good for perf?
-	constexpr uint32_t PRIMES[7] = { 1, 2654435761, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
+	// 438976903 PRIMES[0] = 1 or 2654435761 PRIMES[1] = 1 is very good for perf?
+	constexpr uint32_t PRIMES[7] = { 438976903, 1, 805459861, 3674653429, 2097192037, 1434869437, 2165219737 };
 	class DimensionHasher
 	{
 	public:
@@ -428,14 +428,18 @@ namespace rpml
 				+FLT_MAX );
 	}
 	DEVICE_INLINE
-	float nerfDensityActivation(float x)
+	float nerfDensityActivation( float x )
 	{
-		return INTRIN_EXPF( x );
+		return INTRIN_EXPF( clamp( x, -15.0f, 15.0f ) );
 	}
 	DEVICE_INLINE
 	float nerfDensityActivationDerivative( float x )
 	{
-		return INTRIN_EXPF( clamp( x, -15.0f, 15.0f ) );
+		if( x < -15.0f || 15.0f < x )
+		{
+			return 0.0f;
+		}
+		return INTRIN_EXPF( x );
 	}
 	DEVICE_INLINE
 	float nerfRgbActivation( float x )
@@ -464,7 +468,7 @@ namespace rpml
 		hasher.add( pz * NERF_OCCUPANCY_GRID_MIN_RES, NERF_OCCUPANCY_GRID_MIN_RES );
 
 		uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
-		return avg < occupancyGrid[index];
+		return fminf( avg, 10.0f ) < occupancyGrid[index];
 	}
 
 	DEVICE_INLINE float srgbLinear2Gamma( float c )
