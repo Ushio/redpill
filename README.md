@@ -4,11 +4,10 @@
 
 https://sites.google.com/view/raytracingcamp8
 
-## 
-
 ## build
 
 ```
+git submodule update --init
 premake5 vs2019
 ```
 
