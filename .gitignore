@@ -1,0 +1,4 @@
+build/*
+bin/nerf*
+bin/*.exe
+bin/*.pdb
