@@ -4,12 +4,18 @@
 
 https://sites.google.com/view/raytracingcamp8
 
+## environment
+    AMD: Navi 10 or later
+    NVIDIA: compute capability 7.0 or later ( https://en.wikipedia.org/wiki/CUDA )
+
 ## build
 
 ```
 git submodule update --init
 premake5 vs2019
 ```
+
+open build\MachineLearning.sln
 
 ## Assets
 This repository needs assets for training. Please find the link and put it as
