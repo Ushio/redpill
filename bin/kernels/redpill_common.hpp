@@ -489,7 +489,12 @@ namespace rpml
 		hasher.add( pz * NERF_OCCUPANCY_GRID_MIN_RES, NERF_OCCUPANCY_GRID_MIN_RES );
 
 		uint32_t index = hasher.value() % NERF_OCCUPANCY_GRID_T;
-		return avg < occupancyGrid[index];
+
+		// this was better for the RTCamp scene but
+		// return avg < occupancyGrid[index];
+
+		// this is a bit robust in terms of transparent objects
+		return fminf( avg, 10.f ) < occupancyGrid[index];
 	}
 
 	DEVICE_INLINE float srgbLinear2Gamma( float c )

@@ -8,7 +8,8 @@
 
 #include <half.h>
 
-#define ENABLE_WMMA 1
+// Please 1 for NV device, AMD device cannot handle this macro for now
+#define ENABLE_WMMA 0
 
 #define RPMLX_ASSERT( ExpectTrue ) \
 	if( ( ExpectTrue ) == 0 )     \

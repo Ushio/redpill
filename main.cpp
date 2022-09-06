@@ -239,7 +239,7 @@ int main()
 	oroError err;
 	err = oroInit( 0 );
 	oroDevice device;
-	err = oroDeviceGet( &device, 1 );
+	err = oroDeviceGet( &device, 0 );
 	oroCtx ctx;
 	err = oroCtxCreate( &ctx, 0, device );
 	oroCtxSetCurrent( ctx );

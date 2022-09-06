@@ -360,7 +360,8 @@ int main()
 	// const int n_rays_per_batch = 4096;
 	const int n_rays_per_batch = 1024;
 
-#if 1
+	// RT camp rendering logic for submission.
+#if 0
 	printf( "initialize done at %f\n", executionSW.elapsed() );
 	{
 		static std::vector<NeRFInput> inputs;
@@ -551,6 +552,8 @@ int main()
 
 	return 0;
 #endif
+
+	// GUI mode: 
 
 	bool isLearning = true;
 
