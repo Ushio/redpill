@@ -56,9 +56,9 @@ m_hashConfig.b = 2.0f;
 You can play around.
 
 ## Presentation Slides - Neural Radiance Fields to Implementation
-You can find detailed explanation of NeRF at here
+You can find detailed explanation of NeRF at [here](slides/Presentation_NeRF_Ushio.pdf)
 
-[Slides](slides/Presentation_NeRF_Ushio.pdf)
+[![demo](slides/Presentation_NeRF_Ushio_Thumb.png)](slides/Presentation_NeRF_Ushio.pdf)
 
 ## References
 - Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik, Jonathan T. Barron, Ravi Ramamoorthi and Ren Ng, “NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis”
