@@ -39,7 +39,7 @@ bin/nerf/val/transforms_val.json
 | macro      | location| Description |
 | ----------- |----------- | ----------- |
 | INSTANT_NGP_SCENE | nerf.cpp | 0: rtcamp8 scene, 1: lego scene |
-| SAMPLING_INTERRESTED_SEGMENT | bin\kernels\redpill_common.hpp | if INSTANT_NGP_SCENE==1 then this should be 1, otherwise 0 |
+| SAMPLING_INTERRESTED_SEGMENT | bin\kernels\redpill_common.hpp | if INSTANT_NGP_SCENE==0 then this should be 1, otherwise 0 |
 | ENABLE_WMMA | redpillg.hpp | 1 is recommended at NV device. AMD device cannot compile ENABLE_WMMA=1 yet |
 
 ## Important source codes
