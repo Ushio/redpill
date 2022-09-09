@@ -4,6 +4,8 @@
 
 https://sites.google.com/view/raytracingcamp8
 
+The short introduction of the renderer is [here](slides/RedPill_Ushio.pdf)
+
 ## environment
     Windows 10
 
