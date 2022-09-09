@@ -5,6 +5,8 @@
 https://sites.google.com/view/raytracingcamp8
 
 ## environment
+    Windows 10
+
     AMD: Navi 10 or later
     NVIDIA: compute capability 7.0 or later ( https://en.wikipedia.org/wiki/CUDA )
 
@@ -36,7 +38,7 @@ bin/nerf/val/transforms_val.json
 | ----------- |----------- | ----------- |
 | INSTANT_NGP_SCENE | nerf.cpp | 0: rtcamp8 scene, 1: lego scene |
 | SAMPLING_INTERRESTED_SEGMENT | bin\kernels\redpill_common.hpp | if INSTANT_NGP_SCENE==1 then this should be 1, otherwise 0 |
-| ENABLE_WMMA | redpillg.hpp | 1 is recommended at NV device. AMD device cannot compile this macro yet |
+| ENABLE_WMMA | redpillg.hpp | 1 is recommended at NV device. AMD device cannot compile ENABLE_WMMA=1 yet |
 
 ## Nerf parameter
 
@@ -52,6 +54,11 @@ m_hashConfig.b = 2.0f;
 ```
 
 You can play around.
+
+## Presentation Slides - Neural Radiance Fields to Implementation
+You can find detailed explanation of NeRF at here
+
+[Slides](slides/Presentation_NeRF_Ushio.pdf)
 
 ## References
 - Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik, Jonathan T. Barron, Ravi Ramamoorthi and Ren Ng, “NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis”
