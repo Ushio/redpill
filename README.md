@@ -6,13 +6,13 @@ https://sites.google.com/view/raytracingcamp8
 
 The short introduction of the renderer is [here](slides/RedPill_Ushio.pdf)
 
-## environment
+## Environment
     Windows 10
 
     AMD: Navi 10 or later ( vega10 or vega20 could work but I didn't really test it )
     NVIDIA: compute capability 7.0 or later ( https://en.wikipedia.org/wiki/CUDA )
 
-## build
+## Build
 
 ```
 git submodule update --init
@@ -35,12 +35,22 @@ bin/nerf/val/transforms_train.json
 bin/nerf/val/transforms_val.json
 ```
 
-## important Macros
+## Important Macros
 | macro      | location| Description |
 | ----------- |----------- | ----------- |
 | INSTANT_NGP_SCENE | nerf.cpp | 0: rtcamp8 scene, 1: lego scene |
 | SAMPLING_INTERRESTED_SEGMENT | bin\kernels\redpill_common.hpp | if INSTANT_NGP_SCENE==1 then this should be 1, otherwise 0 |
 | ENABLE_WMMA | redpillg.hpp | 1 is recommended at NV device. AMD device cannot compile ENABLE_WMMA=1 yet |
+
+## Important source codes
+|  location| Description |
+| ----------- | ----------- |
+| bin\kernels\mlpForward.cu | main cuda kernel for machine learning |
+| bin\kernels\redpill_common.hpp | helper kernel. mainly for sharing the logics on GPU/CPU |
+| redpillg.hpp | main host code for machine learning |
+| redpill.hpp | cpu reference for the debug purpose. Probably, NeRF class on this code won't work. |
+| nerf.cpp | NeRF entry point |
+| main.cpp | image reconstruction demo |
 
 ## Nerf parameter
 
