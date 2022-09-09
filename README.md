@@ -9,7 +9,7 @@ The short introduction of the renderer is [here](slides/RedPill_Ushio.pdf)
 ## environment
     Windows 10
 
-    AMD: Navi 10 or later
+    AMD: Navi 10 or later ( vega10 or vega20 could work but I didn't really test it )
     NVIDIA: compute capability 7.0 or later ( https://en.wikipedia.org/wiki/CUDA )
 
 ## build
