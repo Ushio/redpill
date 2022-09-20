@@ -72,6 +72,9 @@ You can find detailed explanation of NeRF at [here](slides/Presentation_NeRF_Ush
 
 [![demo](slides/Presentation_NeRF_Ushio_Thumb.png)](slides/Presentation_NeRF_Ushio.pdf)
 
+History
+- Fixed the network architecture 2022/9/21
+
 ## References
 - Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik, Jonathan T. Barron, Ravi Ramamoorthi and Ren Ng, “NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis”
 - Thomas Müller, Fabrice Rousselle, Jan Novák, and Alex Keller, “Real-time Neural Radiance Caching for Path Tracing”
