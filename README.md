@@ -84,4 +84,6 @@ History
 - “Orochi” repository : https://github.com/GPUOpen-LibrariesAndSDKs/Orochi
 - Jeremy Appleyard and Scott Yokim, “Programming Tensor Cores in CUDA 9” : https://developer.nvidia.com/blog/programming-tensor-cores-cuda-9/
 
-
+### Regarding the name of this repository
+This repository is for my personal study and personal curious.
+Note that there is no any cultural or political intension for this repository name.
