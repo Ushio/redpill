@@ -130,7 +130,9 @@ namespace rpml
 			}
 			for( int i = 0; i < includeDirs.size(); ++i )
 			{
-				options.push_back( "-I " + includeDirs[i] );
+				// A space between -I and path should not exist. 
+				// This is a workaround for AMD rtc API on hiprtc0503.dll
+				options.push_back( "-I" + includeDirs[i] );
 			}
 
 			if( compileMode == CompileMode::RelwithDebInfo )
